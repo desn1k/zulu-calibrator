@@ -12,6 +12,11 @@ def test_healthz_ok(client: TestClient) -> None:
     assert resp.json() == {"status": "ok", "db": "ok"}
 
 
+def test_healthz_answers_head_requests(client: TestClient) -> None:
+    # Uptime monitors often probe with HEAD.
+    assert client.head("/healthz").status_code == 200
+
+
 def test_healthz_reports_unavailable_database(tmp_path: Path) -> None:
     # The database "file" is a directory, so SQLite cannot open it.
     broken = tmp_path / "not_a_file.db"

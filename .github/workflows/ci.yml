@@ -55,14 +55,16 @@ jobs:
         run: docker compose up -d --build --wait --wait-timeout 180
 
       - name: Health check over HTTPS through Caddy
+        shell: bash -euo pipefail {0}
         run: |
           # DOMAIN=localhost makes Caddy use its internal CA, hence -k.
-          curl -fsSk https://localhost/healthz | tee /dev/stderr | grep -q '"status":"ok"'
-          curl -fsSkI https://localhost/healthz | grep -qi '^strict-transport-security:'
-          curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost/healthz | grep -qE '^30[18]$'
+          curl -fsSk https://localhost/healthz | tee /dev/stderr | grep '"status":"ok"' > /dev/null
+          curl -fsSkI https://localhost/healthz | grep -i '^strict-transport-security:' > /dev/null
+          curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/healthz | grep -E '^30[18]$' > /dev/null
 
       - name: Home page
-        run: curl -fsSk https://localhost/ | grep -q 'lang="ru"'
+        shell: bash -euo pipefail {0}
+        run: curl -fsSk https://localhost/ | grep 'lang="ru"' > /dev/null
 
       - name: Backup was written
         run: |
