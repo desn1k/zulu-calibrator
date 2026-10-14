@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Выгрузка №{{ it.number }} — {{ project.ctp_name }}{% endblock %}
+
+{% block content %}
+<p><a href="/projects/{{ project.id }}">← к расчёту</a></p>
+<h1>Выгрузка №{{ it.number }}</h1>
+<p class="muted">Прошлая выгрузка — только чтение. {{ step_titles.get(it.step, "Первичная выгрузка") }}{% if it.identical_to_previous %} · результаты идентичны предыдущей{% endif %}.</p>
+
+<h2>ЦТП — результаты расчёта</h2>
+<table>
+  <tbody>
+    {% for k in card_fields %}<tr><td><code>{{ k }}</code></td><td>{{ snap.card[k]|ru }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<h2>Потребители</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Sys</th><th>Схема</th>{% for k in consumer_fields %}<th>{{ k }}</th>{% endfor %}</tr></thead>
+  <tbody>
+    {% for c in snap.consumers %}
+    <tr><td>{{ c.sys }}</td><td>{{ c.scheme }}</td>{% for k in consumer_fields %}<td>{{ c.fields.get(k)|ru }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

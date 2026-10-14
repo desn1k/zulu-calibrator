@@ -4,8 +4,16 @@ docs/algorithm.md: «Шаги 4–5» → «Шаг 5 — шайбы домов»
 """
 
 from app.engine import config
-from app.engine.meters import consumer_kind, meter_for
-from app.engine.model import Consumer, CtpFact, Recommendation, Snapshot, StepResult
+from app.engine.grouping import Shares, house_meters
+from app.engine.meters import consumer_kind
+from app.engine.model import (
+    DISTRUST_FIELD,
+    Consumer,
+    CtpFact,
+    Recommendation,
+    Snapshot,
+    StepResult,
+)
 from app.engine.step3 import correct_washer, inlet_deviation_pct, washer_from_scratch
 
 STEP5_DO_NOT_TOUCH = ["Kso", "Qo_r", "T1_r / T3_r / T2_r домов", "шайба ввода ЦТП"]
@@ -39,7 +47,7 @@ def junk_rows(c: Consumer) -> list[Recommendation]:
     return rows
 
 
-def step5(snap: Snapshot, fact: CtpFact) -> StepResult:
+def step5(snap: Snapshot, fact: CtpFact, shares: Shares | None = None) -> StepResult:
     res = StepResult(step="5", do_not_touch=list(STEP5_DO_NOT_TOUCH))
     dev = inlet_deviation_pct(snap, fact)
     if dev is None or abs(dev) > config.INLET_FLOW_PCT:
@@ -50,10 +58,14 @@ def step5(snap: Snapshot, fact: CtpFact) -> StepResult:
         )
         return res
 
+    meters = house_meters(snap.consumers, shares)
     for c in snap.consumers:
         if consumer_kind(c.scheme) != "heating":
             continue
         sys = str(c.sys)
+        if c.get(DISTRUST_FIELD):
+            res.notes.append(f"Sys {sys}: прибор помечен «не доверять» — пропущен.")
+            continue
         if c.num("Regul_G"):
             res.notes.append(
                 f"Sys {sys}: есть регулятор (Regul_G = {c.get('Regul_G')}) — пропущен."
@@ -66,7 +78,7 @@ def step5(snap: Snapshot, fact: CtpFact) -> StepResult:
 
         junk = junk_rows(c)
         res.rows.extend(junk)
-        m = meter_for(c)
+        m = meters.get(c.sys)
         g_model, h_ras = c.num("Gso"), c.num("H_ras")
         if m is None or not m.G1:
             res.notes.append(f"Sys {sys}: нет прибора — общий множитель kG (не отработано).")

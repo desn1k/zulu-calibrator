@@ -2,21 +2,24 @@
 
 ## 0. Current state
 
-- PR-1 (skeleton) merged: FastAPI app, SQLite + Alembic, Docker Compose (app, Caddy, backup), CI,
-  `docs/DEPLOY.md`.
-- PR-2 (engine) is in review on branch `pr-2-engine`. `app/engine/` (pure functions):
-  - `legacy.py` — import of the old calculator export (fixture format); drops `Name`, `Bld`, `Adres`
-    and any address field; pre-fills the CTP inlet/heating fact from the stored form inputs.
-  - `meters.py` — meter block per scheme (26 → `_GVS`; heating → `_OT`, else `_TS` «взят ввод»),
-    meter checks 1–11.
-  - `grouping.py` — GUID + system type groups, multi-input split by load, duplicate-fact flag.
-  - `step1.py` … `step5.py` — CTP scheme 2 test parameters and Kgv (with the approved «по теплу»
-    fallback), Kcirc / Hcirc / Tcirc, CTP inlet washer, Kso by exception (default variant А),
-    building washers, washers in series, junk washer fields.
-  - `criteria.py` — criteria of steps 1–5 on a fresh export; «identical exports» trap.
-  - `config.py` — all tolerances; values given only in words in algorithm.md are marked APPROVED.
-- All README golden values are tests (`tests/engine/`).
-- Next: PR-3 (local UI), after PR-2 is merged.
+- PR-1 (skeleton) and PR-2 (engine, `app/engine/`) merged.
+- PR-3 (local UI, no auth) is in review on branch `pr-3-local-ui`:
+  - DB (migration `0002`): `project` (CTP + measurement date, CTP fact, settings), `iteration`
+    (each imported export, attached to the open step), `step_state`, `consumer_edit` (by Sys).
+  - `app/services/projects.py` — state machine fact → checks → 1 … 5 → summary; recommendations and
+    criteria always from the latest export with manual edits applied; «принять с отклонением»
+    needs a comment.
+  - `app/routes/projects.py` + templates: home, history / resume, import (`static/import.js` strips
+    Name / Bld / Adres in the browser; the server strips again), CTP fact form (м вод. ст. or
+    кгс/см² ×10), meter checks 1–11 with per-Sys edits (block, value, «не доверять») and
+    multi-input shares, one page per step with «Копировать», summary, read-only iterations.
+  - Engine: `edits.py` (manual edits), `house_meters` (split meters of multi-input houses with
+    edited shares) used by steps 4–5 and criteria; «не доверять» meters are left out of the balance,
+    the recommendations and the criteria.
+  - Run locally: `scripts/run_local.ps1` / `scripts/run_local.sh` (`docs/LOCAL.md`), 127.0.0.1 only.
+- PR-2 CodeRabbit review had not arrived when PR-2 was merged: address it at the start of the next PR
+  (fix with a test, or reply with a reason on the PR-2 threads).
+- Next: PR-4 (auth by login), after PR-3 is merged.
 
 ## Rule before any public deployment
 
@@ -27,7 +30,7 @@
 
 1. PR-1 Skeleton — merged.
 2. PR-2 Engine: meter checks and balances, GUID grouping and multi-input split, steps 1–5 for CTP
-   scheme 2 and consumer schemes 4 and 26, washers-in-series rule, golden tests. — in review.
+   scheme 2 and consumer schemes 4 and 26, washers-in-series rule, golden tests. — merged.
 3. PR-3 UI for local use, NO auth yet (localhost only):
    - home page («Новый расчёт ЦТП», «История ЦТП»); project = CTP + measurement date;
    - intake page importing the old calculator JSON export (fixture format; Name/Bld/Adres stripped
@@ -35,6 +38,8 @@
    - one page per step: «поле → сейчас → ввести» table, «не трогать» list, criteria pass/fail,
      re-import of fresh data per iteration, «принять с отклонением» with a mandatory comment;
    - history and resume. Run with `uvicorn` on localhost.
+   - manual consumer fact edits by Sys (block, value, «не доверять»), GUID groups with editable
+     shares, «Копировать» on each step's table. — in review.
 4. PR-4 Auth by login (no email field anywhere): admin/user roles, admin creates users with
    login + display name and a one-time generated password, forced password change, TOTP + backup
    codes, throttling, sessions, CSRF, secure headers.
@@ -57,6 +62,11 @@
   `NotImplementedError` for `draw_off_source="ctp"`.
 
 ## Decisions log
+
+- Local UI: a fresh export attaches to the open step and is checked against its criteria;
+  recommendations always come from the latest export (with manual edits). No CSRF/auth until PR-4 —
+  localhost only.
+- Numbers are shown and copied with a decimal comma («Копировать»: Sys / field / value, tab-separated).
 
 - Stack: FastAPI + Jinja2 + HTMX, SQLite (SQLAlchemy/Alembic, Postgres-ready), Docker Compose + Caddy.
 - GUID stored as is (not personal data). Consumer names/addresses never stored.

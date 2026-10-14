@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Проверка приборов — {{ project.ctp_name }}{% endblock %}
+
+{% block content %}
+<h1>Проверка приборов</h1>
+<p class="muted">До любых правок приборы сводятся в баланс. Прибор, который противоречит балансу, помечается
+  и не идёт в цель подгонки. Калькулятор ничего не правит сам.</p>
+
+<table class="checks">
+  <thead><tr><th>№</th><th>Проверка</th><th>Итог</th><th>Что сделать</th></tr></thead>
+  <tbody>
+    {% for c in checks %}
+    <tr class="status-{{ c.status.value }}">
+      <td>{{ c.no }}</td>
+      <td>{{ c.title }}
+        {% if c.values %}<div class="values">
+          {% for k, v in c.values.items() %}{% if v is number %}{{ k }} = {{ v|ru(3) }}{% if not loop.last %}; {% endif %}{% elif v is sameas true or v is sameas false %}{{ k }} = {{ v|ru }}{% if not loop.last %}; {% endif %}{% endif %}{% endfor %}
+        </div>{% endif %}
+      </td>
+      <td>{{ {"ok": "в норме", "note": "пояснение", "flag": "флажок", "question": "вопрос", "n/a": "нет данных"}[c.status.value] }}</td>
+      <td>{{ c.message }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Приборы потребителей</h2>
+<p class="muted">Блок прибора, любое значение или «не доверять прибору». Правки хранятся по Sys и сохраняются
+  при каждой новой выгрузке. Изменённые ячейки подсвечены.</p>
+<form method="post" action="/projects/{{ project.id }}/checks/edits">
+  <div class="table-wrap">
+  <table class="consumers">
+    <thead>
+      <tr><th>Sys</th><th>Схема</th><th>GUID</th><th>Блок</th>
+        <th>T1</th><th>T2</th><th>P1</th><th>P2</th><th>G1</th><th>G2</th><th>Q</th><th>Не доверять</th></tr>
+    </thead>
+    <tbody>
+      {% for c in consumers %}
+      <tr>
+        <td>{{ c.sys }}<input type="hidden" name="{{ c.sys }}:shown" value="{{ c.shown }}"></td>
+        <td>{{ c.scheme }}</td>
+        <td class="muted">{{ c.guid }}</td>
+        <td>
+          <select name="{{ c.sys }}:block" class="{% if c.edited_block %}is-edited{% endif %}">
+            <option value="">по схеме ({{ c.auto }})</option>
+            {% for b in blocks %}<option value="{{ b }}" {% if c.block == b %}selected{% endif %}>_{{ b }}</option>{% endfor %}
+          </select>
+          <div class="muted small">показан _{{ c.shown }}</div>
+        </td>
+        {% for name, key, value, edited in c.cells %}
+        <td><input class="num{% if edited %} edited{% endif %}" name="{{ c.sys }}:{{ name }}" value="{{ value|ru }}" inputmode="decimal" title="{{ name }}"></td>
+        {% endfor %}
+        <td><input type="checkbox" name="{{ c.sys }}:distrust" {% if c.distrust %}checked{% endif %}></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <button type="submit">Сохранить правки</button>
+</form>
+
+{% if groups %}
+<h2>Многовводовые дома</h2>
+<p class="muted">Несколько объектов одного типа под одним GUID: в каждой строке один неделёный прибор на дом.
+  Прибор делится по нагрузке; доли можно поправить (сумма — 100 %).</p>
+<form method="post" action="/projects/{{ project.id }}/checks/shares">
+  {% for g in groups %}
+  <fieldset>
+    <legend>GUID {{ g.key.split(':')[0][:8] }} · {{ {"heating": "отопление", "dhw": "ГВС", "vent": "вентиляция"}[g.kind] }}</legend>
+    <table>
+      <thead><tr><th>Sys</th><th>Нагрузка</th><th>Доля, %</th></tr></thead>
+      <tbody>
+        {% for m in g.members %}
+        <tr>
+          <td>{{ m.sys }}</td>
+          <td>{{ m.load|ru(4) }}</td>
+          <td><input class="num{% if g.edited %} edited{% endif %}" name="share:{{ m.sys }}" value="{{ m.share|ru(1) }}" inputmode="decimal"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </fieldset>
+  {% endfor %}
+  <button type="submit">Сохранить доли</button>
+</form>
+{% endif %}
+
+<form method="post" action="/projects/{{ project.id }}/checks/next" class="next">
+  <button type="submit">Дальше — шаг 1</button>
+</form>
+{% endblock %}

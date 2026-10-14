@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Факт ЦТП — {{ project.ctp_name }}{% endblock %}
+
+{% block content %}
+<h1>Факт ЦТП</h1>
+<p class="muted">Показания приборов ЦТП за период замера. Ввод и отопление заполнены из выгрузки, ГВС — вручную.
+  Давления — в выбранных единицах; в расчёте всё в м вод. ст.</p>
+<form method="post" action="/projects/{{ project.id }}/fact">
+  {% for block, title, names in blocks %}
+  <fieldset>
+    <legend>{{ title }}</legend>
+    <label class="inline"><input type="checkbox" name="{{ block }}_missing" {% if values[block ~ '_missing'] %}checked{% endif %}> нет прибора</label>
+    <div class="grid">
+      {% for n in names %}
+      <label>{{ labels.get(n, n) }}
+        <input name="{{ block }}_{{ n }}" value="{{ values[block ~ '_' ~ n]|ru }}" inputmode="decimal">
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% endfor %}
+  <fieldset>
+    <legend>Режим</legend>
+    <div class="grid">
+      <label>Tнв замера, °C <input name="mode_tnv" value="{{ values.mode_tnv|ru }}" inputmode="decimal"></label>
+      <label>t подачи на источнике, °C <input name="mode_t_source" value="{{ values.mode_t_source|ru }}" inputmode="decimal"></label>
+      <label>Tхв, °C <input name="mode_thv" value="{{ values.mode_thv|ru }}" inputmode="decimal"></label>
+      <label>Данные
+        <select name="mode_data_type">
+          <option value="day" {% if values.mode_data_type != 'hour' %}selected{% endif %}>суточные</option>
+          <option value="hour" {% if values.mode_data_type == 'hour' %}selected{% endif %}>часовые</option>
+        </select>
+      </label>
+      <label>Единицы давления
+        <select name="mode_pressure_unit">
+          <option value="m" {% if values.mode_pressure_unit != 'kgf_cm2' %}selected{% endif %}>м вод. ст.</option>
+          <option value="kgf_cm2" {% if values.mode_pressure_unit == 'kgf_cm2' %}selected{% endif %}>кгс/см² (×10)</option>
+        </select>
+      </label>
+    </div>
+  </fieldset>
+  <button type="submit">Сохранить и перейти к проверке приборов</button>
+</form>
+{% endblock %}

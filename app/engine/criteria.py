@@ -4,7 +4,13 @@ docs/algorithm.md: «Критерии шага 1…5», «Ловушки» (iden
 """
 
 from app.engine import config
-from app.engine.grouping import group_consumers, split_multi_input
+from app.engine.grouping import (
+    Shares,
+    group_consumers,
+    group_key,
+    house_meters,
+    split_multi_input,
+)
 from app.engine.meters import consumer_kind, meter_for
 from app.engine.model import Criterion, CtpFact, Snapshot
 
@@ -95,28 +101,36 @@ def criteria_step3(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
     ]  # fmt: skip
 
 
-def house_heat(snap: Snapshot) -> list[Criterion]:
+def house_heat(snap: Snapshot, shares: Shares | None = None) -> list[Criterion]:
+    """Q_sum of each heating house ±5 %; houses without a usable meter are left out."""
+    meters = house_meters(snap.consumers, shares)
     out = []
     for c in snap.consumers:
-        if consumer_kind(c.scheme) != "heating":
+        m = meters.get(c.sys)
+        if consumer_kind(c.scheme) != "heating" or m is None or m.Q is None:
             continue
-        m = meter_for(c)
-        out.append(by_pct(f"Q_sum:{c.sys}", f"Sys {c.sys}: Q_sum ±5 %", c.num("Q_sum"),
-                          m.Q if m else None, config.HOUSE_HEAT_PCT))  # fmt: skip
+        out.append(by_pct(f"Q_sum:{c.sys}", f"Sys {c.sys}: Q_sum ±5 %", c.num("Q_sum"), m.Q,
+                          config.HOUSE_HEAT_PCT))  # fmt: skip
     return out
 
 
-def criteria_step4(snap: Snapshot) -> list[Criterion]:
-    return house_heat(snap)
+def criteria_step4(snap: Snapshot, shares: Shares | None = None) -> list[Criterion]:
+    return house_heat(snap, shares)
 
 
-def criteria_step5(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
+def criteria_step5(snap: Snapshot, fact: CtpFact, shares: Shares | None = None) -> list[Criterion]:
+    """Gso per house (multi-input: each input ±5 %, the group ±2 %), Gsum_pod2, heat of houses.
+
+    Houses without a usable meter (none, or «не доверять») are left out.
+    """
     out = []
     for g in group_consumers(snap.consumers):
         if g.kind != "heating":
             continue
         if g.multi_input:
-            split = split_multi_input(g)
+            split = split_multi_input(g, (shares or {}).get(group_key(g)))
+            if not split:
+                continue
             for c in g.members:
                 fact_g = split[c.sys].G1 if c.sys in split else None
                 title = f"Sys {c.sys}: Gso ±5 % (ввод многовводового дома)"
@@ -129,13 +143,15 @@ def criteria_step5(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
             continue
         [c] = g.members
         m = meter_for(c)
-        out.append(by_pct(f"Gso:{c.sys}", f"Sys {c.sys}: Gso ±2 %", c.num("Gso"),
-                          m.G1 if m else None, config.HOUSE_FLOW_PCT))  # fmt: skip
+        if m is None or m.G1 is None:
+            continue
+        out.append(by_pct(f"Gso:{c.sys}", f"Sys {c.sys}: Gso ±2 %", c.num("Gso"), m.G1,
+                          config.HOUSE_FLOW_PCT))  # fmt: skip
 
     out.append(by_pct("Gsum_pod2", "Gsum_pod2 ЦТП ±1 %", snap.card_num("Gsum_pod2"),
                       fact.heating.G3 if fact.heating else None,
                       config.CTP_SECOND_CIRCUIT_FLOW_PCT))  # fmt: skip
-    out.extend(house_heat(snap))
+    out.extend(house_heat(snap, shares))
     return out
 
 

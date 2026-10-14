@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any, Literal
 
 from app.engine import config
-from app.engine.model import Consumer, CtpFact
+from app.engine.model import BLOCK_FIELD, DISTRUST_FIELD, Consumer, CtpFact
 
 Kind = Literal["heating", "dhw", "vent"]
 
@@ -52,8 +52,19 @@ def read_block(c: Consumer, block: str) -> dict[str, float | None]:
 
 
 def meter_for(c: Consumer) -> Meter | None:
-    """«Какой блок брать» — by scheme, not by the TS/OTOP/GVS flags."""
+    """«Какой блок брать» — by scheme, not by the TS/OTOP/GVS flags.
+
+    A manual edit can choose the block or mark the meter «не доверять» (then there is no meter).
+    """
+    if c.get(DISTRUST_FIELD):
+        return None
     kind = consumer_kind(c.scheme)
+    forced = c.get(BLOCK_FIELD)
+    if forced:
+        values = read_block(c, forced)
+        if all(v is None for v in values.values()):
+            return None
+        return Meter(forced, **values, from_inlet=(forced == "TS" and kind == "heating"))
     if kind == "dhw":
         values = read_block(c, "GVS")
         return Meter("GVS", **values) if any(v is not None for v in values.values()) else None
@@ -319,7 +330,14 @@ def meter_checks(
                 "Pcalibr не заполнять."
                 if same
                 else "",
-                {"supply_shift": s_sup, "return_shift": s_ret},
+                {
+                    "P1": inlet.P1,
+                    "Ppod": ppod,
+                    "P2": inlet.P2,
+                    "Pobr": pobr,
+                    "supply_shift": s_sup,
+                    "return_shift": s_ret,
+                },
             )
         )
     else:

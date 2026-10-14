@@ -5,7 +5,7 @@ docs/algorithm.md: «Шаг 2 — циркуляция ГВС домов» (Kcir
 
 from app.engine import config
 from app.engine.meters import consumer_kind, meter_for
-from app.engine.model import Recommendation, Snapshot, StepResult
+from app.engine.model import DISTRUST_FIELD, Recommendation, Snapshot, StepResult
 
 STEP2_DO_NOT_TOUCH = ["Kgv", "Tgv домов", "Hgv2_ras / Hgv2_obr ЦТП"]
 
@@ -21,6 +21,9 @@ def step2(snap: Snapshot) -> StepResult:
             continue
         m = meter_for(c)
         sys = str(c.sys)
+        if c.get(DISTRUST_FIELD):
+            res.notes.append(f"Sys {sys}: прибор помечен «не доверять» — пропущен.")
+            continue
         if m is None or not m.G2:
             res.notes.append(f"Sys {sys}: тупиковый объект (нет циркуляции по прибору) — пропущен.")
             continue

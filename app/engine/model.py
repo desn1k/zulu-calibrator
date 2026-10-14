@@ -8,6 +8,10 @@ from app.engine.units import PressureUnit
 
 CTP_TARGET = "ЦТП"
 
+# Manual edits are applied as these extra consumer fields (see app/engine/edits.py).
+BLOCK_FIELD = "_meter_block"  # meter block chosen by the user: "OT", "TS", "GVS", "SV"
+DISTRUST_FIELD = "_distrust"  # «не доверять прибору»
+
 
 @dataclass(frozen=True)
 class InletFact:

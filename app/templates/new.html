@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Новый расчёт ЦТП{% endblock %}
+{% block head %}<script src="/static/import.js" defer></script>{% endblock %}
+
+{% block content %}
+<h1>Новый расчёт ЦТП</h1>
+<p>Выберите JSON-файл старого калькулятора («Собрать файл для разбора»).
+  Имена и адреса потребителей (Name, Bld, Adres) удаляются в браузере до отправки.</p>
+<form method="post" action="/projects" class="import-form">
+  <input type="file" accept=".json,application/json" data-import-file required>
+  <textarea name="payload" hidden></textarea>
+  <button type="submit">Создать расчёт</button>
+</form>
+{% endblock %}

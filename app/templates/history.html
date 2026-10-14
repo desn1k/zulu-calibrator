@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}История ЦТП{% endblock %}
+
+{% block content %}
+<h1>История ЦТП</h1>
+<p><a class="button" href="/projects/new">Новый расчёт ЦТП</a></p>
+{% if rows %}
+<table>
+  <thead>
+    <tr><th>ЦТП</th><th>Дата замера</th><th>Схема</th><th>Текущий шаг</th><th>Статус</th><th>Выгрузок</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.project.ctp_name }}</td>
+      <td>{{ r.project.measured_on|ru }}</td>
+      <td>{{ r.scheme|ru }}</td>
+      <td>{{ r.step }}</td>
+      <td>{{ r.project.status }}</td>
+      <td>{{ r.iterations }}</td>
+      <td><a href="/projects/{{ r.project.id }}">Продолжить</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Расчётов пока нет.</p>
+{% endif %}
+{% endblock %}

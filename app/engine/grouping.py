@@ -84,3 +84,26 @@ def duplicate_facts(consumers: list[Consumer]) -> list[tuple[int, int]]:
         else:
             seen[key] = c
     return pairs
+
+
+Shares = dict[str, dict[int, float]]  # group key → {Sys: share}, user-edited split
+
+
+def group_key(group: Group) -> str:
+    return f"{group.guid}:{group.kind}"
+
+
+def house_meters(
+    consumers: list[Consumer], shares: Shares | None = None
+) -> dict[int, Meter | None]:
+    """Meter per consumer: the split meter for a multi-input house, its own meter otherwise."""
+    out: dict[int, Meter | None] = {}
+    for g in group_consumers(consumers):
+        if g.multi_input:
+            split = split_multi_input(g, (shares or {}).get(group_key(g)))
+            for c in g.members:
+                out[c.sys] = split.get(c.sys)
+        else:
+            for c in g.members:
+                out[c.sys] = meter_for(c)
+    return out
