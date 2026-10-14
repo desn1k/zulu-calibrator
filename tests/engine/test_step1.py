@@ -1,8 +1,11 @@
 """Step 1: CTP scheme, heating HX, DHW stages (scheme 2), Kgv (algorithm «Шаг 1»)."""
 
+import dataclasses
+
 import pytest
 
 from app.engine.step1 import (
+    DRAW_OFF_HINT,
     KGV_BY_HEAT_NOTE,
     choose_scheme,
     kgv_rows,
@@ -101,6 +104,33 @@ def test_step1_result_on_initial_state(fact) -> None:
         assert field in res.do_not_touch
 
 
+def test_step1_shows_balanced_and_meter_t2(fact) -> None:
+    res = step1(imported("it0_initial").snapshot, fact, t22_niz=59.0, t12_verh=57.5)
+    assert res.t2_balanced == pytest.approx(57.19, abs=0.005)
+    assert res.t2_meter == 57.0
+
+
+def test_hint_when_houses_draw_off_is_below_ctp(fact) -> None:
+    # check 7: houses 4.7 t/h < CTP 6.7 t/h, draw-off source «дома»
+    res = step1(imported("it0_initial").snapshot, fact, t22_niz=59.0, t12_verh=57.5)
+    assert DRAW_OFF_HINT in res.notes
+    assert DRAW_OFF_HINT == (
+        "T2 ввода физически не опустится до факта — допустимо принять с отклонением"
+    )
+
+
+def test_no_hint_when_houses_draw_off_covers_ctp(fact) -> None:
+    dhw = dataclasses.replace(fact.dhw, Gc=18.6)  # CTP draw-off 4.5 < houses 4.7
+    low = dataclasses.replace(fact, dhw=dhw)
+    res = step1(imported("it0_initial").snapshot, low, t22_niz=59.0, t12_verh=57.5)
+    assert DRAW_OFF_HINT not in res.notes
+
+
 def test_step1_has_no_rows_once_entered(fact) -> None:
     res = step1(imported("it2_step1a").snapshot, fact, t22_niz=59.0, t12_verh=57.5)
     assert [r for r in res.rows if r.target == "ЦТП"] == []
+
+
+def test_ctp_draw_off_target_is_not_implemented_yet(fact) -> None:
+    with pytest.raises(NotImplementedError):
+        step1(imported("it0_initial").snapshot, fact, draw_off_source="ctp")

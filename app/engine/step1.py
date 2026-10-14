@@ -5,12 +5,14 @@ parameters for scheme 2, 1.3 Kgv of DHW objects).
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from app.engine import config
 from app.engine.meters import consumer_kind, meter_for
 from app.engine.model import CTP_TARGET, Consumer, CtpFact, Recommendation, Snapshot, StepResult
 
 KGV_BY_HEAT_NOTE = "по теплу (расход не измерен)"
+DRAW_OFF_HINT = "T2 ввода физически не опустится до факта — допустимо принять с отклонением"
 
 STEP1_DO_NOT_TOUCH = [
     "Kso",
@@ -83,9 +85,8 @@ class TestParams:
 def scheme2_test_params(fact: CtpFact, t22_niz: float, t12_verh: float) -> TestParams:
     """1.2 for scheme 2. Free parameters: T22_niz and T12_verh.
 
-    The inlet T2 is the measurement «сведённый в баланс» (step 1 intro): the value that makes the
-    inlet heat G·(T1 − T2) equal to Qсо + Q_i_niz + Q_i_verh. With it the stage I outlet T12_niz,
-    T11_niz and T12_i follow the README golden values (57.2 / 60.9 / 61.1 for meter T2 = 57.0).
+    The inlet T2 is balanced first (1.2, approved): T2_bal = T1 − 1000·(Qсо + Q_i_niz + Q_i_verh)/G
+    and T12_niz = T2_bal. The page shows both T2_bal and the meter T2 (README: 57.2 vs 57.0).
     """
     inlet, heating, dhw, thv = fact.inlet, fact.heating, fact.dhw, fact.mode.thv
     if inlet is None or heating is None or dhw is None:
@@ -218,6 +219,22 @@ def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
     return rows
 
 
+@dataclass
+class Step1Result(StepResult):
+    t2_balanced: float | None = None  # inlet T2 used for the test parameters (1.2)
+    t2_meter: float | None = None
+
+
+def houses_draw_off(consumers: list[Consumer]) -> float:
+    total = 0.0
+    for c in consumers:
+        if consumer_kind(c.scheme) == "dhw":
+            m = meter_for(c)
+            if m is not None and m.draw_off is not None:
+                total += m.draw_off
+    return total
+
+
 def same_value(current, enter: float, name: str) -> bool:
     if not isinstance(current, int | float) or isinstance(current, bool):
         return False
@@ -229,8 +246,12 @@ def step1(
     fact: CtpFact,
     t22_niz: float | None = None,
     t12_verh: float | None = None,
-) -> StepResult:
-    res = StepResult(step="1", do_not_touch=list(STEP1_DO_NOT_TOUCH))
+    draw_off_source: Literal["houses", "ctp"] = "houses",
+) -> Step1Result:
+    """`draw_off_source` is the user's answer to check 7 (target of Kgv); only «дома» for now."""
+    if draw_off_source != "houses":
+        raise NotImplementedError("Kgv target «верим ЦТП» is not implemented yet")
+    res = Step1Result(step="1", do_not_touch=list(STEP1_DO_NOT_TOUCH))
     card = snap.card
 
     choice = choose_scheme(fact)
@@ -252,6 +273,7 @@ def step1(
             t22_niz = s22 if t22_niz is None else t22_niz
             t12_verh = s12 if t12_verh is None else t12_verh
         p = scheme2_test_params(fact, t22_niz, t12_verh)
+        res.t2_balanced, res.t2_meter = p.t2_balanced, p.t2_meter
         for name, enter in p.rounded().items():
             current = card.get(name)
             if not same_value(current, enter, name):
@@ -265,6 +287,9 @@ def step1(
             res.questions.append("T12_i < T21_i + 0,8 — сдвинуть T22_niz / T12_verh.")
         if not p.t12_verh_ok:
             res.questions.append("T12_verh должна быть ≥ T21_verh + 2.")
+        # «Если верим домам, а разбор ЦТП больше, I ступень физически не охладит обратку до факта»
+        if houses_draw_off(snap.consumers) < p.draw_off:
+            res.notes.append(DRAW_OFF_HINT)
 
     if card.get("Regul_T") != 1:
         res.rows.append(

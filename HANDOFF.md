@@ -14,7 +14,7 @@
     fallback), Kcirc / Hcirc / Tcirc, CTP inlet washer, Kso by exception (default variant А),
     building washers, washers in series, junk washer fields.
   - `criteria.py` — criteria of steps 1–5 on a fresh export; «identical exports» trap.
-  - `config.py` — all tolerances; values marked ASSUMPTION need Andrew's confirmation.
+  - `config.py` — all tolerances; values given only in words in algorithm.md are marked APPROVED.
 - All README golden values are tests (`tests/engine/`).
 - Next: PR-3 (local UI), after PR-2 is merged.
 
@@ -51,6 +51,11 @@
 8. PR-8 Real Zulu paste parser (CTP card and consumer query) behind the parser interface, once
    Andrew provides samples.
 
+### Backlog
+
+- Kgv target «верим ЦТП» (check 7 answer «ЦТП»): not specified in algorithm.md yet; engine raises
+  `NotImplementedError` for `draw_off_source="ctp"`.
+
 ## Decisions log
 
 - Stack: FastAPI + Jinja2 + HTMX, SQLite (SQLAlchemy/Alembic, Postgres-ready), Docker Compose + Caddy.
@@ -67,6 +72,12 @@
   AI, other schemes, Zulu paste parser. Auth must be merged before any public deployment.
 - Approved method change (algorithm.md 1.3): Kgv by heat when the draw-off is not measured
   (G1_GVS − G2_GVS ≤ 0.05 t/h or missing): Kgv = Q_GVS / Qgv_sred, «по теплу (расход не измерен)».
+- Approved method change (algorithm.md 1.2): the inlet T2 is balanced first,
+  T2_bal = T1 − 1000·(Qсо + Q_i_niz + Q_i_verh)/G, T12_niz = T2_bal; the page shows T2_bal and the meter T2.
+- Tolerances given in words only in algorithm.md (checks 1/2 ±2 %, check 4 < 25 %, check 11 within 2 m,
+  «T11_niz не ≈ T1» > 1 °C) approved as in `app/engine/config.py` (marked APPROVED).
+- Step 1 hint when the draw-off source is «дома» and Σ house draw-off < CTP draw-off: «T2 ввода
+  физически не опустится до факта — допустимо принять с отклонением».
 - Step 4 default is variant А (no changes, heat deficit reported); Kso only with the «исключение Kso» flag.
 - Units: all pressures (meters and Zulu fields) are м вод. ст.; no conversion. The CTP fact form has a
   unit setting (м вод. ст. default, кгс/см² ×10 as an option).
