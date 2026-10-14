@@ -29,6 +29,10 @@ Zulu, checks convergence after each verification run, and keeps history.
 7. Update `HANDOFF.md` («0. Current state» and the work queue) in every PR that changes state.
 8. Releases only with an explicit `IMAGE_TAG` (e.g. `v0.1.0-rc1`), never `latest`.
    Release candidates are launched by Andrew.
+9. After every push to a PR branch, and whenever Andrew says «review», read all PR review comments
+   (`gh pr view --comments` and `gh api .../pulls/{n}/comments`), address each one in the same PR
+   (fix with a test, or reply with a reason if you disagree), reply to each comment on GitHub, push,
+   and summarize what was done. Never resolve or dismiss a review on your own — Andrew decides.
 
 ## Architecture
 
