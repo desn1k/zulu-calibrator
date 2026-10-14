@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Итог — {{ project.ctp_name }}{% endblock %}
+
+{% block content %}
+<h1>Итог</h1>
+<p>Статус: <strong>{{ project.status }}</strong>.</p>
+
+{% if states %}
+<h2>Шаги</h2>
+<ul>
+  {% for s in states %}
+  <li>{{ step_titles[s.step] }} — {% if s.status == "accepted" %}принят с отклонением: «{{ s.comment }}»{% else %}сошёлся{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Модель / факт по последней выгрузке</h2>
+<table class="criteria">
+  <thead><tr><th>Поле</th><th>Что</th><th>модель</th><th>факт</th><th>Откл.</th><th>Итог</th></tr></thead>
+  <tbody>
+    {% for c in rows %}
+    <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
+      <td><code>{{ c.key }}</code></td>
+      <td>{{ c.title }}</td>
+      <td>{{ c.model|ru(3) }}</td>
+      <td>{{ c.fact|ru(3) }}</td>
+      <td>{% if c.deviation is not none %}{{ c.deviation|ru(2) }} {{ c.unit }}{% endif %}</td>
+      <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Проверка вторым днём: поменять только Tnv_t, t на источнике и % ГВС, сделать поверку и
+  сравнить с приборами того дня — новый расчёт ЦТП с другой датой замера.</p>
+{% endblock %}

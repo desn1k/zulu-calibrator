@@ -6,12 +6,27 @@
   <title>{% block title %}Калибровка ЦТП{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx-2.0.11.min.js" defer></script>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="/">Калибровка ЦТП</a>
+    <a href="/projects">История ЦТП</a>
   </header>
   <main class="content">
+    {% if project is defined and nav is defined %}
+    <nav class="steps" aria-label="Шаги">
+      <div class="project-name">{{ project.ctp_name }} · {{ project.measured_on|ru }}</div>
+      <ol>
+        {% for s in nav %}
+        <li class="{% if s.current %}current{% elif not s.open %}locked{% endif %}">
+          {% if s.open %}<a href="{{ s.url }}">{{ s.title }}</a>{% else %}<span>{{ s.title }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </nav>
+    {% endif %}
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

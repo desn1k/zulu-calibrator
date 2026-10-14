@@ -8,8 +8,9 @@ variant Б, Kso_нов = Kso · Qфакт / Qмодель.
 from dataclasses import dataclass, field
 
 from app.engine import config
-from app.engine.meters import consumer_kind, meter_for
-from app.engine.model import Recommendation, Snapshot, StepResult
+from app.engine.grouping import Shares, house_meters
+from app.engine.meters import consumer_kind
+from app.engine.model import DISTRUST_FIELD, Recommendation, Snapshot, StepResult
 
 KSO_EXCEPTION_NOTE = "нагрузка в модели ≠ договорной"
 
@@ -34,12 +35,16 @@ class Step4Result(StepResult):
     heat_report: list[HeatDeviation] = field(default_factory=list)
 
 
-def step4(snap: Snapshot, kso_exception: bool = False) -> Step4Result:
+def step4(snap: Snapshot, kso_exception: bool = False, shares: Shares | None = None) -> Step4Result:
     res = Step4Result(step="4", do_not_touch=list(STEP4_DO_NOT_TOUCH))
+    meters = house_meters(snap.consumers, shares)
     for c in snap.consumers:
         if consumer_kind(c.scheme) != "heating":
             continue
-        m = meter_for(c)
+        if c.get(DISTRUST_FIELD):
+            res.notes.append(f"Sys {c.sys}: прибор помечен «не доверять» — пропущен.")
+            continue
+        m = meters.get(c.sys)
         q_model = c.num("Q_sum")
         if m is None or not m.Q or not q_model:
             res.questions.append(f"Sys {c.sys}: нет тепла прибора или модели — не сравнить.")

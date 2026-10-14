@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} — {{ project.ctp_name }}{% endblock %}
+{% block head %}
+<script src="/static/import.js" defer></script>
+<script src="/static/copy.js" defer></script>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if state %}
+<p class="state">Шаг {% if state.status == "accepted" %}принят с отклонением: «{{ state.comment }}»{% else %}сошёлся{% endif %}.</p>
+{% endif %}
+
+{% if view.message %}<p class="error">{{ view.message }}</p>{% endif %}
+{% if view.identical %}
+<p class="warning">Результаты свежей выгрузки идентичны предыдущей — правка не внесена или поверочный расчёт не запущен.</p>
+{% endif %}
+{% if view.iteration %}
+<p class="muted">Расчёт по выгрузке №{{ view.iteration.number }} ({{ view.iteration.created_at.strftime("%d.%m.%Y %H:%M") if view.iteration.created_at else "" }}).</p>
+{% endif %}
+
+{% if is_current and step == "1" %}
+<form method="post" action="/projects/{{ project.id }}/steps/1/settings" class="settings">
+  <fieldset>
+    <legend>Свободные параметры (схема 2)</legend>
+    <label>T22_niz <input name="t22_niz" value="{{ settings.t22_niz|ru }}" placeholder="по умолчанию" inputmode="decimal"></label>
+    <label>T12_verh <input name="t12_verh" value="{{ settings.t12_verh|ru }}" placeholder="по умолчанию" inputmode="decimal"></label>
+    <button type="submit">Пересчитать</button>
+  </fieldset>
+</form>
+{% endif %}
+{% if step == "1" and view.result and view.result.t2_balanced is not none %}
+<p class="t2">T2_bal (T2 ввода, сведённая в баланс) = <strong>{{ view.result.t2_balanced|ru(1) }}</strong> °C ·
+  T2 прибора = {{ view.result.t2_meter|ru }} °C</p>
+{% endif %}
+
+{% if is_current and step == "4" %}
+<form method="post" action="/projects/{{ project.id }}/steps/4/settings" class="settings">
+  <label class="inline"><input type="checkbox" name="kso_exception" {% if settings.kso_exception %}checked{% endif %}>
+    исключение Kso (вариант Б: нагрузка в модели ≠ договорной)</label>
+  <button type="submit">Применить</button>
+</form>
+{% endif %}
+
+{% if view.result %}
+<h2>Ввести в Zulu</h2>
+{% if view.result.rows %}
+<table class="rows">
+  <thead><tr><th>Объект</th><th>Поле</th><th>Сейчас</th><th>Ввести</th><th>Основание</th></tr></thead>
+  <tbody>
+    {% for r in view.result.rows %}
+    <tr>
+      <td>{{ r.target }}</td>
+      <td><code>{{ r.field }}</code></td>
+      <td>{{ r.current|ru }}</td>
+      <td class="enter">{% if r.enter is none %}<em>очистить</em>{% else %}{{ r.enter|ru }}{% endif %}</td>
+      <td>{{ r.reason }}{% if r.note %} <span class="tag">{{ r.note }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p>
+  <button type="button" data-copy-target="copy-{{ step }}">Копировать</button>
+  <span class="muted small">Sys / поле / значение через табуляцию</span>
+</p>
+<textarea id="copy-{{ step }}" class="copy-src" readonly hidden>{{ copy }}</textarea>
+{% else %}
+<p>Ничего вводить не нужно.</p>
+{% endif %}
+
+{% if view.result.do_not_touch %}
+<h3>Не трогать</h3>
+<ul class="do-not-touch">{% for f in view.result.do_not_touch %}<li><code>{{ f }}</code></li>{% endfor %}</ul>
+{% endif %}
+
+{% if view.result.notes %}
+<h3>Пояснения</h3>
+<ul>{% for n in view.result.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+{% endif %}
+{% if view.result.questions %}
+<h3>Вопросы</h3>
+<ul class="questions">{% for q in view.result.questions %}<li>{{ q }}</li>{% endfor %}</ul>
+{% endif %}
+{% if step == "4" and view.result.heat_report %}
+<h3>Тепло домов: модель / факт</h3>
+<table>
+  <thead><tr><th>Sys</th><th>Q_sum модели</th><th>Q прибора</th><th>Откл., %</th></tr></thead>
+  <tbody>{% for h in view.result.heat_report %}
+    <tr><td>{{ h.target }}</td><td>{{ h.model|ru }}</td><td>{{ h.fact|ru }}{% if h.from_inlet %} (ввод){% endif %}</td><td>{{ h.deviation_pct|ru(1) }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+{% endif %}
+{% endif %}
+
+<h2>Критерии шага</h2>
+{% if view.criteria %}
+<table class="criteria">
+  <thead><tr><th>Критерий</th><th>Модель</th><th>Факт</th><th>Откл.</th><th>Допуск</th><th>Итог</th></tr></thead>
+  <tbody>
+    {% for c in view.criteria %}
+    <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
+      <td>{{ c.title }} <span class="muted small">{{ c.key }}</span></td>
+      <td>{{ c.model|ru(3) }}</td>
+      <td>{{ c.fact|ru(3) }}</td>
+      <td>{% if c.deviation is not none %}{{ c.deviation|ru(2) }} {{ c.unit }}{% endif %}</td>
+      <td>{% if c.limit %}±{{ c.limit|ru }} {{ c.unit }}{% endif %}</td>
+      <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Для этого варианта шага проверять нечего.</p>
+{% endif %}
+
+{% if is_current %}
+<h2>Поверочный расчёт</h2>
+<p class="muted">Внесите значения в Zulu, сделайте поверочный расчёт и загрузите свежую выгрузку.</p>
+<form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/import" class="import-form">
+  <input type="file" accept=".json,application/json" data-import-file required>
+  <textarea name="payload" hidden></textarea>
+  <button type="submit">Загрузить свежую выгрузку</button>
+</form>
+
+<div class="step-actions">
+  <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/advance">
+    <button type="submit" {% if not view.passed %}disabled title="Критерии не сошлись"{% endif %}>Шаг сошёлся — дальше</button>
+  </form>
+  <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/accept" class="accept">
+    <label>Комментарий <input name="comment" required></label>
+    <button type="submit" class="secondary">Принять с отклонением</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>Выгрузки</h2>
+<ul class="iterations">
+  {% for it in iterations %}
+  <li><a href="/projects/{{ project.id }}/iterations/{{ it.number }}">№{{ it.number }}</a> — {{ step_titles.get(it.step, "первичная") }}{% if it.identical_to_previous %} (идентична предыдущей){% endif %}</li>
+  {% endfor %}
+</ul>
+{% endblock %}
