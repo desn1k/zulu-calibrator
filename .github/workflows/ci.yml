@@ -21,6 +21,8 @@ jobs:
 
       - name: Install pinned dependencies
         run: |
+          # sqlite3 CLI for the backup script tests.
+          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends sqlite3
           python -m pip install --disable-pip-version-check -r requirements-dev.lock
           python -m pip check
 

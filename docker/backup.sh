@@ -18,10 +18,16 @@ backup_once() {
     tmp="$DIR/.app-$ts.db.tmp"
     out="$DIR/app-$ts.db"
 
-    sqlite3 "$DB" ".backup '$tmp'"
-    if [ "$(sqlite3 "$tmp" 'PRAGMA integrity_check;')" != "ok" ]; then
-        echo "backup: integrity check failed, backup discarded"
+    # Check explicitly: in the loop set -e is off (backup_once || true), and integrity_check on a
+    # missing $tmp would create an empty database that passes the check.
+    if ! sqlite3 "$DB" ".backup '$tmp'"; then
         rm -f "$tmp"
+        echo "backup: sqlite3 .backup failed"
+        return 1
+    fi
+    if [ "$(sqlite3 "$tmp" 'PRAGMA integrity_check;')" != "ok" ]; then
+        rm -f "$tmp"
+        echo "backup: integrity check failed, backup discarded"
         return 1
     fi
     mv "$tmp" "$out"
