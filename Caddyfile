@@ -1,0 +1,16 @@
+# HTTPS certificates for {$DOMAIN} are obtained and renewed automatically (Let's Encrypt).
+{
+	# Set by docker-compose.yml to "email <ACME_EMAIL>" when ACME_EMAIL is filled, otherwise empty.
+	{$ACME_EMAIL_OPTION}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy app:8000
+}

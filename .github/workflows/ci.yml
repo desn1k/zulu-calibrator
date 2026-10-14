@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint and tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned dependencies
+        run: |
+          # sqlite3 CLI for the backup script tests.
+          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends sqlite3
+          python -m pip install --disable-pip-version-check -r requirements-dev.lock
+          python -m pip check
+
+      - name: Runtime lock is a subset of the dev lock
+        run: |
+          missing=$(comm -23 <(grep -v '^#' requirements.lock | sort) <(grep -v '^#' requirements-dev.lock | sort))
+          if [ -n "$missing" ]; then echo "Pins differ between locks:"; echo "$missing"; exit 1; fi
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Tests
+        run: pytest
+
+  smoke:
+    name: Docker Compose smoke test
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Write .env
+        run: |
+          cp .env.example .env
+          sed -i "s/^DOMAIN=.*/DOMAIN=localhost/" .env
+          sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=ci-${GITHUB_SHA::12}/" .env
+          sed -i "s/^SECRET_KEY=.*/SECRET_KEY=ci-only-not-a-secret/" .env
+
+      - name: Build and start
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Health check over HTTPS through Caddy
+        shell: bash -euo pipefail {0}
+        run: |
+          # DOMAIN=localhost makes Caddy use its internal CA, hence -k.
+          curl -fsSk https://localhost/healthz | tee /dev/stderr | grep '"status":"ok"' > /dev/null
+          curl -fsSkI https://localhost/healthz | grep -i '^strict-transport-security:' > /dev/null
+          curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/healthz | grep -E '^30[18]$' > /dev/null
+
+      - name: Home page
+        shell: bash -euo pipefail {0}
+        run: curl -fsSk https://localhost/ | grep 'lang="ru"' > /dev/null
+
+      - name: Backup was written
+        run: |
+          for i in $(seq 1 15); do
+            if docker compose exec -T backup sh -c 'ls /backups/app-*.db' 2>/dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "no backup file found"; exit 1
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color
+
+      - name: Stop
+        if: always()
+        run: docker compose down -v

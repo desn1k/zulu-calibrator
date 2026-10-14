@@ -29,6 +29,10 @@ Zulu, checks convergence after each verification run, and keeps history.
 7. Update `HANDOFF.md` («0. Current state» and the work queue) in every PR that changes state.
 8. Releases only with an explicit `IMAGE_TAG` (e.g. `v0.1.0-rc1`), never `latest`.
    Release candidates are launched by Andrew.
+9. After every push to a PR branch, and whenever Andrew says «review», read all PR review comments
+   (`gh pr view --comments` and `gh api .../pulls/{n}/comments`), address each one in the same PR
+   (fix with a test, or reply with a reason if you disagree), reply to each comment on GitHub, push,
+   and summarize what was done. Never resolve or dismiss a review on your own — Andrew decides.
 
 ## Architecture
 
@@ -45,11 +49,24 @@ Zulu, checks convergence after each verification run, and keeps history.
   (not calibrated / in check / calibrated). Initial state: CTP scheme 2, consumer schemes 4 and 26 calibrated.
   The UI warns when a project uses a scheme that is not calibrated. «Calibrated» is set only by a user
   pressing «confirm» on a finished project.
-- AI assistant (OpenAI API) is called only from the backend. It explains and reviews a step.
+- AI assistant is called only from the backend. It explains and reviews a step.
   It NEVER produces the numbers to enter in Zulu and its output is never written into input fields.
-  Payload = compact step summary (no raw exports). Model and monthly spend limit are settings.
-- Deployment: Docker Compose (app + Caddy). Caddy gets HTTPS automatically from `DOMAIN` in `.env`.
-  One command on a clean Ubuntu 24.04 VPS: `docker compose up -d`.
+  Payload = compact step summary (no raw exports).
+  - Provider-agnostic client with two providers: GigaChat (primary) and OpenAI (secondary).
+    `AI_DEFAULT_PROVIDER` (`gigachat` | `openai`) sets the initial one; admin switches the active
+    provider in app settings.
+  - Per-provider settings in `.env`: `GIGACHAT_API_KEY`, `GIGACHAT_MODEL`, `GIGACHAT_SCOPE`,
+    `GIGACHAT_PROXY_URL`; `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_PROXY_URL` (optional).
+  - Each provider uses ONLY its own proxy (HTTP CONNECT), set on that provider's HTTP client only and
+    never on other app traffic (no global `HTTP(S)_PROXY`).
+  - GigaChat: OAuth token flow via `ngw.devices.sberbank.ru:9443`; the Russian Ministry of Digital
+    Development root CA is added to the image trust store. Its proxy is the server in Russia reached over
+    NetBird (tinyproxy with a domain allowlist).
+  - Monthly spend limit and cost counter per provider: GigaChat in RUB, OpenAI in USD.
+- Deployment: Docker Compose (app + Caddy + daily backup). The image is built locally (`build: .`,
+  tag `zulu-calibrator:${IMAGE_TAG}`), no image registry. Caddy gets HTTPS automatically from `DOMAIN`
+  in `.env`. On a clean Ubuntu 24.04 VPS: `git clone`, fill `.env`, `docker compose up -d --build`
+  (step by step in `docs/DEPLOY.md`).
 
 ## Privacy
 
@@ -66,7 +83,9 @@ Zulu, checks convergence after each verification run, and keeps history.
 - Login throttling (5 attempts / 15 min per IP and per account, growing delay), generic error messages.
 - Server-side sessions, cookie HttpOnly + Secure + SameSite=Strict, rotate on login, 12 h idle timeout,
   CSRF token on every state-changing request.
-- Roles: admin and user. Only admin creates users (email + display name), gets a one-time generated
+- Accounts are identified by a login (username), NOT an email. There is no email field anywhere
+  (152-FZ: the app server is outside Russia, so no personal data of users is stored).
+- Roles: admin and user. Only admin creates users (login + display name), gets a one-time generated
   password to hand over, can reset passwords and disable accounts. User must change password on first login.
 - Secrets only in `.env` (never committed); `.env.example` documents every variable.
 - Pinned dependency versions. Daily SQLite backup in the compose setup.

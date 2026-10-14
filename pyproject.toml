@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zulu-calibrator"
+version = "0.1.0"
+description = "Step-by-step calibration of ZuluThermo CTP models against heat-meter data"
+requires-python = ">=3.12"
+# Direct dependencies. Exact versions of everything (including transitive packages)
+# live in requirements.lock / requirements-dev.lock (regenerate with scripts/lock.sh).
+dependencies = [
+    "alembic==1.20.0",
+    "fastapi==0.141.1",
+    "jinja2==3.1.6",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy==2.0.54",
+    "uvicorn==0.53.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx==0.28.1",
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
