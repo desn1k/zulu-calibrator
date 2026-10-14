@@ -134,7 +134,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Должно быть три сервиса: `app` (статус `healthy`), `caddy` и `backup` (`running`).
+Должно быть три сервиса, все в статусе `healthy`: `app`, `caddy` и `backup`. У `backup` статус `healthy` значит, что последняя копия базы моложе 26 часов.
 
 ## 8. Проверить
 
@@ -152,6 +152,7 @@ curl https://calib.example.org/healthz
 | --- | --- |
 | ошибка сертификата / соединения | DNS (шаг 2) указывает на этот сервер; порты 80 и 443 открыты у хостера и в `ufw`; `docker compose logs caddy` |
 | `app` не `healthy` | `docker compose logs app` |
+| `backup` не `healthy` | копии не делаются: `docker compose logs backup` |
 | ответ 502 | приложение ещё запускается — подождать минуту и повторить |
 
 ## 9. Резервные копии

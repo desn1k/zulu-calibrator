@@ -39,8 +39,14 @@ services:
       app:
         condition: service_healthy
     entrypoint: ["backup.sh"]
+    # Healthy while the newest backup is less than 26 hours old.
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "test -n \"$(find /backups -maxdepth 1 -name 'app-*.db' -mmin -1560)\""]
+      interval: 5m
+      timeout: 10s
+      start_period: 2m
+      start_interval: 2s
+      retries: 1
     environment:
       DB_PATH: /data/app.db
       BACKUP_DIR: /backups
