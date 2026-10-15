@@ -117,8 +117,10 @@ def test_verkhnyaya_mixed_dead_end_dhw_from_it0() -> None:
     assert v["Tgv"] == 62.7
     assert (v["Hgv2_obr"], v["Hgv2_ras"]) == (108.4, 2)  # sum = H_geo + P1_GVS
     kgv = by_target(res.rows, "Kgv")
-    for sys, expected in VER_KGV.items():  # model flow, shifted by the new Tgv (60 → 62.7)
+    for sys, expected in VER_KGV.items():  # Kgv·G/Ggv × (62.7 − 5)/(60 − 5): Tgv in the same batch
         assert near(kgv[sys], expected, 0.01), sys
+    reasons = [r.reason for r in res.rows if r.field == "Kgv"]
+    assert all("× (62.7 − 5)/(60 − 5) = 1.0491" in r for r in reasons)
 
 
 # ------------------------------------------------------------------ 2-я Пионерская (scheme 6)

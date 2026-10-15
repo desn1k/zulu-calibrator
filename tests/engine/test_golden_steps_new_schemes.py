@@ -267,14 +267,16 @@ def test_pionerskaya_kso_by_group_meters_and_a8_fine_tune() -> None:
     assert close(kso["33638"], 0.784, 0.005) and close(kso["40398"], 0.784, 0.005)
     assert close(kso["33640"], 0.749, 0.005) and close(kso["40383"], 0.749, 0.005)
 
-    # a8 fine-tune from it2 with the README heat target ≈ 0.42 (loss chosen to give exactly 0.42).
-    # With the card loss of the same run (0.0106; the it0–it3 cards are missing, the it4 card is
-    # used) the target is 0.4164 and Kso 0.9675 (−0.9 %) — reported in the PR.
+    # a8 fine-tune from it2, engine rule: loss = Qut_pod + Qut_obr + Qut_potr of the card (0.0106;
+    # the it0–it3 cards are missing, the it4 card is used) → Kso 0.9675.
+    # Reference 0.976: session used README remainder 0.42; card loss gives −0.9 %, within the ±4 %
+    # hard tolerance.
     snap, fact = zulu(PI, "it2_step5_supply_washers_regul_test")
-    i = step_inputs(snap, fact, group_meters=pi_meters(snap), loss=1.54 - 0.592 - 0.521 - 0.42)
+    i = step_inputs(snap, fact, group_meters=pi_meters(snap))
     res = step4(snap, i.targets, kso_exception=True, q_heating=i.validity.q_heating, loss=i.loss)
     kso = by_target(res.rows, "Kso")
-    assert close(kso["33636"], 0.976, 0.005) and close(kso["40387"], 0.976, 0.005)
+    assert close(kso["33636"], 0.9675, 0.005) and close(kso["40387"], 0.9675, 0.005)
+    assert abs(kso["33636"] / 0.976 - 1) * 100 < 4.0
 
 
 def test_pionerskaya_return_washer_is_the_lever_and_series_washers_count() -> None:

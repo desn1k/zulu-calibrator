@@ -55,28 +55,29 @@ Decided and applied:
 - DHW outlet temperature within 1 °C; step 5 with CTP pumps waits for the inlet within ±4 %.
 - Огородная step 4 passing with a comment at −4.1 %; ruff skips `tests/fixtures`.
 
+Decided after review (2026-10-15):
+
+- Огородная golden tests keep the manual «формула 1.3» override; the automatic rule stays the default
+  (−6.4 / −4.8 / +3.6 % on 33553 / 33559 / 33561, refined by the next run).
+- If the same SQL batch changes the CTP Tgv, Kgv_new (model branch) × (Tgv_new − Thv)/(Tgv_old − Thv);
+  the factor is shown on the row (Верхняя: × 1.0491).
+- Stage II from it5: the rule gives 0.337 (the session entered 0.31 and needed a second pass) — no
+  assert.
+- Пионерская a8 fine-tune: the engine uses the card loss (0.9675); 0.976 (README remainder 0.42) is a
+  reference, −0.9 %, within the hard ±4 %.
+
 Still open (for Andrew):
 
-1. Огородная under the automatic Kgv rule (all metered objects alive): 33553 0.338 vs 0.361
-   (−6.4 %), 33559 0.295 vs 0.31 (−4.8 %), 33561 0.259 vs 0.25 (+3.6 %); 33567 by heat 0.072
-   unchanged. The golden test pins the manual override «формула 1.3» (the session's choice).
-2. Верхняя under the automatic rule: plain Kgv·G/Ggv gives 0.626 vs 0.658 (−4.9 %). The same run sets
-   Tgv 60 → 62.7, so the model branch scales by (T + ΔT − Thv)/(T − Thv) — Zulu's draw-off at the new
-   delivered temperature; with it every value is within 0.5 %. Kept, to confirm.
-3. Stage II from it5: the approved rule gives 0.337 (model flow 9.248 inflated by the cold DHW);
-   the session entered 0.31 (target 8.5). Not asserted as golden.
-4. Пионерская a8 fine-tune 0.976 is reproduced with the README target 0.42; with the card loss
-   (0.0106, the it4 card — it0–it3 cards are missing) it is 0.9675 (−0.9 %).
-5. Thresholds kept outside the ±4 / ±2 pattern (they would break their own fixtures):
+1. Thresholds kept outside the ±4 / ±2 pattern (they would break their own fixtures):
    `DHW_HOUSES_AGREE_PCT` 10 % (Чернышевского buildings −8.8 % from the CTP balance),
    `CHANNEL_FACTOR_MAX_DIFF_PCT` 25 % (Верхняя valid channel +4.1 %, rejected ×0.07 vs ×1.22),
    `STEP2_TCIRC_ONLY_COOLING_SHARE` 0.5 (not a deviation; Береговая 12.8 of 15.0 °C → Tcirc only,
    Огородная 1.7 of 12 °C → step 2). Step 2 «Gcirc ±10 %» left as in the algorithm.
-6. A multi-input building with one meter: the flow target is split by model flow (task); the GUID
+2. A multi-input building with one meter: the flow target is split by model flow (task); the GUID
    section of the algorithm still says Qo_r (user shares override). One Kso per building.
-7. Regul_T = 1 is not recommended for scheme 12 (the session kept 0).
-8. Hsec_niz 0.4 (Чернышевского run 1): no rule found, not recommended.
-9. Known Regul_G / Regul_T labels: «Без регулятора», «Регулятор температуры»; any other label stops
+3. Regul_T = 1 is not recommended for scheme 12 (the session kept 0).
+4. Hsec_niz 0.4 (Чернышевского run 1): no rule found, not recommended.
+5. Known Regul_G / Regul_T labels: «Без регулятора», «Регулятор температуры»; any other label stops
    the import with a message.
 
 ## Rule before any public deployment

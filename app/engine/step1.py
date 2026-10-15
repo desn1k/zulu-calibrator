@@ -234,7 +234,7 @@ def model_dhw_temperature(c: Consumer, thv: float) -> float | None:
 def kgv_rows(
     consumers: list[Consumer],
     mode: KgvMode = "auto",
-    t_shift: float = 0.0,
+    tgv_change: tuple[float, float] | None = None,
     ctp_supply: float | None = None,
 ) -> list[Recommendation]:
     """1.3: Kgv of DHW objects where the model draw-off differs from the house meter by more than
@@ -245,7 +245,8 @@ def kgv_rows(
       the branch is shown on the row;
     - «formula» (algorithm 1.3): Kgv = G_цель·(Tgv − Thv)/(1000·Qgv_sred);
     - «model»: always Kgv·G_цель/Ggv.
-    `t_shift` — the change of the CTP Tgv entered in the same run (model branch).
+    `tgv_change` — (Tgv_old, Tgv_new) of the CTP when the same SQL batch changes it: the model
+    branch is multiplied by (Tgv_new − Thv)/(Tgv_old − Thv) (approved 2026-10-15).
     Draw-off not measured (G1 − G2 ≤ 0.05 t/h or missing): Kgv = Q_GVS / Qgv_sred, «по теплу
     (расход не измерен)». An unmetered object gets the rest of the CTP DHW supply meter.
     """
@@ -291,18 +292,28 @@ def kgv_rows(
         t_obj = model_dhw_temperature(c, thv)
         if use_model and c.num("Ggv") and t_obj is not None and t_obj > thv:
             model_draw = c.num("Ggv")
-            if abs(model_draw / draw - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT and not t_shift:
+            if (
+                abs(model_draw / draw - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT
+                and not tgv_change
+            ):
                 continue
-            # Kgv·G_цель/Ggv: Zulu takes the draw-off from heat at the delivered temperature. With a
-            # new CTP Tgv in the same run that temperature rises by ΔT and the draw-off falls by
-            # (T − Thv)/(T + ΔT − Thv).
-            new = kgv * draw / model_draw * (t_obj + t_shift - thv) / (t_obj - thv)
-            shift = f" (+{t_shift:.1f} °C: новая Tgv ЦТП)" if t_shift else ""
+            # Kgv·G_цель/Ggv: Zulu takes the draw-off from heat, so raising the CTP Tgv in the same
+            # batch lowers the draw-off at the same Kgv → × (Tgv_new − Thv)/(Tgv_old − Thv).
+            new = kgv * draw / model_draw
+            shift = ""
+            if tgv_change:
+                old, new_tgv = tgv_change
+                factor = (new_tgv - thv) / (old - thv)
+                new *= factor
+                shift = (
+                    f"; × ({new_tgv:g} − {thv:g})/({old:g} − {thv:g}) = {factor:.4f}: Tgv ЦТП "
+                    "меняется в этом же пакете"
+                )
             rows.append(
                 Recommendation(
                     str(c.sys), "Kgv", c.get("Kgv"), round(new, config.ROUND_KGV),
                     f"1.3: Kgv·Gф/Ggv = {kgv:g}·{draw:.2f}/{model_draw:.3f} (T ГВС в модели "
-                    f"{t_obj:.1f}{shift})",
+                    f"{t_obj:.1f}){shift}",
                     note=note,
                 )
             )  # fmt: skip
@@ -385,7 +396,7 @@ def step1(
     card = snap.card
     n_schem = card.get("N_schem")
     scheme = ctp_scheme(n_schem)
-    t_shift = 0.0
+    tgv_change: tuple[float, float] | None = None
 
     if n_schem in (2, 3) or scheme is None:
         choice = choose_scheme(fact)
@@ -399,7 +410,7 @@ def step1(
     if n_schem == 2:
         scheme2_rows(res, snap, fact, t22_niz, t12_verh)
     elif scheme is not None and n_schem in NEW_SCHEMES:
-        t_shift = new_scheme_rows(res, snap, fact, scheme, t22_niz, t12_verh, circulation, t_o)
+        tgv_change = new_scheme_rows(res, snap, fact, scheme, t22_niz, t12_verh, circulation, t_o)
     else:
         res.notes.append(
             f"Схема {n_schem}: «первая проверка» — испытательные параметры пока не считаются."
@@ -417,7 +428,7 @@ def step1(
             )
 
     ctp_supply = fact.dhw.Gp if fact.dhw else None
-    res.rows.extend(kgv_rows(snap.consumers, kgv_mode, t_shift, ctp_supply))
+    res.rows.extend(kgv_rows(snap.consumers, kgv_mode, tgv_change, ctp_supply))
     return res
 
 
@@ -470,19 +481,19 @@ def new_scheme_rows(
     t12_verh: float | None,
     circulation: bool | None,
     t_o: float | None,
-) -> float:
-    """Schemes 3, 5, 6, 12. Returns the Tgv change entered in this run (for «Kgv по модели»)."""
+) -> tuple[float, float] | None:
+    """Schemes 3, 5, 6, 12. Returns (Tgv_old, Tgv_new) when this batch changes the CTP Tgv."""
     card, n = snap.card, scheme.n
     if fact.inlet is None or fact.heating is None or fact.dhw is None:
         res.questions.append("Для шага 1 нужны приборы ввода, отопления и ГВС ЦТП.")
-        return 0.0
+        return None
     target = choose_dhw_target(fact, snap.consumers, circulation)
     res.dhw_target = target
     res.notes.append(f"Цель ГВС: {target.reason}.")
     res.notes.extend(target.notes)
     if target.draw_off is None or target.t_supply is None or target.heat is None:
         res.questions.append("Нет разбора ГВС по домам или Tгв прибора ЦТП — шаг 1 не посчитать.")
-        return 0.0
+        return None
     if not target.circulation:
         res.do_not_touch.append("Kcirc / Hcirc / Tcirc (циркуляции от ЦТП нет, шаг 2 пропускается)")
 
@@ -525,12 +536,12 @@ def new_scheme_rows(
         p = mixed_dependent_params(eff, target, g_inlet, t22_niz, t12_verh)
         add_ctp_rows(res, card, p.values, reason)
     else:
-        return 0.0
+        return None
     res.shown.update(p.shown)
     res.notes.extend(p.notes)
     res.questions.extend(p.questions)
 
-    t_shift = 0.0
+    tgv_change: tuple[float, float] | None = None
     tgv_card = snap.card_num("Tgv")
     if tgv_card is None or round(tgv_card, 1) != round(target.t_supply, 1):
         res.rows.append(
@@ -538,7 +549,7 @@ def new_scheme_rows(
                            "Tgv = Tгв прибора ЦТП")
         )  # fmt: skip
         if tgv_card is not None:
-            t_shift = target.t_supply - tgv_card
+            tgv_change = (tgv_card, target.t_supply)
 
     hgv2 = hgv2_rows_values(snap.card_num("H_geo"), eff, dead_end)
     if hgv2:
@@ -553,7 +564,7 @@ def new_scheme_rows(
             add_ctp_rows(res, card, hgv2, why)
         res.do_not_touch = [f for f in res.do_not_touch if not f.startswith("Hgv2")]
     dhw_return_pressure_check(res, snap)
-    return t_shift
+    return tgv_change
 
 
 def stage2_tuning(res: Step1Result, snap: Snapshot, target: DhwTarget) -> None:

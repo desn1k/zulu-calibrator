@@ -83,7 +83,8 @@ def test_kgv_auto_rule_on_ogorodnaya_differs_from_the_session() -> None:
 
 
 def test_kgv_golden_from_it0(fact) -> None:
-    # the session's choice: «всегда формула 1.3» (manual override in step 1 settings)
+    # the session's choice: «всегда формула 1.3» (manual override in step 1 settings).
+    # session used 1.3; auto rule gives −6.4/−4.8/+3.6 %, refined by the next run
     rows = kgv_rows(imported("it0_initial").snapshot.consumers, "formula")
     kgv = by_target(rows, "Kgv")
     # README gives 2 decimals (0.36 / 0.31 / 0.25 / 0.07); Kgv is now rounded to 3.
