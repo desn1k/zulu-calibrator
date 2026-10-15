@@ -1,0 +1,230 @@
+Name	ЦТП Чернышевского. 8
+Owner	КУИ
+Sp_upr	Концессия
+Division	2 ЭУ (2-й РТС)
+Schem_doc	
+Nist	1
+Sist	1
+H_geo	40.23
+N_schem	12
+T1_r	114
+T1to_so	75
+T2_r	70
+T3_r	95
+Hnz_ras	10.2
+Hnz_obr	96.4
+Podpit	
+Nsec_so	1
+Hsec_so	1
+Ngr_so	1
+Nel_r	0
+Dsop_r	0
+U_calc	0
+U_fakt	0
+Nel_u	
+Dsop_u	
+dHsoplo	
+T1_t	81.58
+T2_t	5
+T11_t	
+T12_t	
+G1_t	
+G2_t	
+T3so_t	6.68
+T2so_t	46.21
+Dshb_pod	30
+Nshb_pod	1
+Dshb_obr	0
+Nshb_obr	0
+Dshb_pod_u	
+Nshb_pod_u	0
+Dshb_obr_u	0
+Nshb_obr_u	0
+dHshb_pod	18.7
+dHshb_obr	
+Dshb_gvs	12.681
+Nshb_gvs	1
+Dshb_gvs_u	
+Nshb_gvs_u	0
+dHshb_gvs	
+Thv	5
+Tgv	65.8
+Hgv2_ras	23.2
+Hgv2_obr	75
+Thv_t	5
+Nsec_niz	1
+Ngr_niz	1
+Hsec_niz	0.4
+T11_i_niz	58.2
+T12_i_niz	53
+T21_i_niz	5
+T22_i_niz	56
+Q_i_niz	0.673
+Gniz	0.1171
+G2_niz	14.862
+Q_niz	0.0048
+T11_niz	46.2
+T12_niz	5
+T21_niz	5
+T22_niz	5.3
+Nsec_verh	1
+Ngr_verh	1
+Hsec_verh	2
+T11_i_verh	70
+T12_i_verh	44
+T21_i_verh	37
+T22_i_verh	60
+Q_i_verh	0.003
+T11_verh	81.6
+T12_verh	5.4
+T21_verh	5.3
+T22_verh	7.1
+Gverh	0.3532
+G2_verh	14.862
+Q_verh	0.0265
+Gset_nal	116.989
+Qo_t	0.006
+Qsv_t	0
+Qgv_t	0.0313
+Gsum_pod	0.3545
+Gt_obr	0.1185
+H_ras	18.74
+H_pod	98.14
+H_obr	79.4
+Ppod	57.91
+Pobr	39.17
+Hout_pod	79.403
+Hgv_pod	98.2
+Hgv_obr	75
+Pout_pod	39.17
+Pgv_pod	58
+Pgv_obr	34.8
+RegulVal	
+Kreg	
+Pout_obr	39.17
+Hout_obr	79.403
+Gperem	0
+Tvso_r	18
+Qgv_sred	
+Regul_T	0
+Regul_T_kvs	
+Kb	
+Regul_G	
+Hzapas	
+RegulType	
+Regul_G_kvs	
+Tcut	
+Tshelf	
+TGraph	
+Tnv_r	-23
+Tnv_t	-12.8
+Tsg_pod	67
+Tsg_obr	49
+Tsg_grunt	8.8
+Tsg_nv	5.3
+Tsg_podval	8.8
+Tsg_tunnel	
+Tgrunt	8.8
+Tpodval	8.8
+Ttunnel	
+Pcalibr_pod	
+Pcalibr_obr	
+Gcalibr_pod	
+Gcalibr_obr	
+Tcalibr_pod	
+Tcalibr_obr	
+Gsum_pod2	0.3532
+Qverh	
+Qniz	
+Qut_pod	0.0001
+Qut_obr	0.0001
+Qut_potr	0.0025
+T11_i	
+T12_i	
+T21_i	
+T22_i	
+G1_i	
+G2_i	130
+Qsum	0.027
+Qts_pod	21222.5222
+Qts_obr	672.7389
+Gut_pod	0.0724
+Gut_obr	0.0724
+Gut_potr	0.3255
+Time	246.76
+Dist	2492.5
+Tb	-4.85
+Tb_out	-9.9
+Hstat	79.12
+Hstat_out	79.12
+Qgv_sum	
+TEPL_PUNKT	
+TEPL_PUNKT_MASTER	
+OTOP	
+GVS	
+VENT	
+HVS	
+TS	
+ID_TIKU_OBJ	e5e2dce3-0576-4fd0-88bf-5ca3547c279f
+ID_TIKU_TS	6fc3b593-e183-4487-8bfc-6b15285b9302
+ID_TIKU_OTOP	931ff006-7dc6-4aab-a1bb-656e8c87b6a3
+ID_TIKU_OTOP_1	0
+ID_TIKU_OTOP_2	0
+ID_TIKU_OTOP_3	0
+ID_TIKU_OTOP_4	0
+ID_TIKU_GVS	ac604901-841a-4baf-b662-89d10af44e57
+ID_TIKU_GVS_1	0
+ID_TIKU_GVS_2	0
+ID_TIKU_GVS_3	0
+ID_TIKU_GVS_4	0
+ID_TIKU_VENT	0
+ID_TIKU_VENT_1	0
+ID_TIKU_VENT_2	0
+ID_TIKU_VENT_3	0
+ID_TIKU_VENT_4	0
+ID_TIKU_HVS	18b749b4-0b66-465c-9f85-a359e69bae76
+ID_TIKU_HVS_1	0
+ID_TIKU_HVS_2	0
+ID_TIKU_HVS_3	0
+ID_TIKU_HVS_4	0
+ID_TIKU_TS_1	0
+ID_TIKU_TS_2	0
+ID_TIKU_TS_3	0
+ID_TIKU_TS_4	0
+TECH_POINT	ДА
+Dispetcher_spisok	
+Certification	
+DateMea	10.02.2026
+Tnv	-12.8
+T1_TS	89.2
+T2_TS	53
+P1_TS	68.8
+P2_TS	55.9
+dP_TS	12.8
+G1_TS	129.5
+G2_TS	132.4
+Q_TS	4.571
+T1_SV	
+T2_SV	
+P1_SV	
+P2_SV	
+dP_SV	
+G1_SV	
+G2_SV	
+Q_SV	
+T1_OT	89.2
+T2_OT	58.2
+P1_OT	66.6
+P2_OT	56.3
+dP_OT	10.3
+G1_OT	128.5
+G2_OT	128.2
+Q_OT	4.012
+T1_GVS	65.8
+T2_GVS	
+P1_GVS	58.3
+P2_GVS	
+dP_GVS	
+G1_GVS	4.7
+G2_GVS	
+Q_GVS	0.285
