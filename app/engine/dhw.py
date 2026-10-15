@@ -222,14 +222,16 @@ def sequential_params(
 
 
 def stage2_correction(
-    q_i_verh: float, q_verh_model: float, g_supply: float, tgv: float, t21_verh_model: float
+    q_i_verh: float, q_verh_model: float, g_model: float, tgv: float, t21_verh_model: float
 ) -> float | None:
     """Scheme 12: Zulu passes ≈ ¼ of the test flow through stage II; tune Q_i_verh by the DHW
     temperature at the CTP outlet: Q_new = Q_i_verh · Q_нужно / Q_verh,
-    Q_нужно = Gп·(Tгв − T21_verh)/1000 (Gп = DHW target flow)."""
+    Q_нужно = G_модели·(Tгв − T21_verh)/1000 with the MODEL flow through stage II (G2_verh) —
+    the criterion is the outlet temperature and the next run sees the model flow (approved
+    2026-10-15)."""
     if not q_verh_model or q_verh_model <= 0:
         return None
-    q_needed = g_supply * (tgv - t21_verh_model) / 1000.0
+    q_needed = g_model * (tgv - t21_verh_model) / 1000.0
     return q_i_verh * q_needed / q_verh_model
 
 

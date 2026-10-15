@@ -71,15 +71,27 @@ def test_suggested_free_params_respect_rules(fact) -> None:
     assert p.closure_ok
 
 
-def test_kgv_golden_from_it0(fact) -> None:
+def test_kgv_auto_rule_on_ogorodnaya_differs_from_the_session() -> None:
+    # 2026-10-15 automatic rule: all metered objects are «alive» (Tgv_t within 10 °C of T1_GVS) →
+    # Kgv·G/Ggv. The Огородная session used formula 1.3 (golden test below pins that override).
+    # Reported to Andrew: 33553 0.338 vs 0.361 (−6.4 %), 33559 0.295 vs 0.31 (−4.8 %),
+    # 33561 0.259 vs 0.25 (+3.6 %); 33567 by heat 0.072 unchanged.
     rows = kgv_rows(imported("it0_initial").snapshot.consumers)
+    assert by_target(rows, "Kgv") == {"33553": 0.338, "33559": 0.295, "33561": 0.259,
+                                      "33567": 0.072}  # fmt: skip
+    assert all("ГВС в модели жива" in r.note for r in rows if r.target != "33567")
+
+
+def test_kgv_golden_from_it0(fact) -> None:
+    # the session's choice: «всегда формула 1.3» (manual override in step 1 settings)
+    rows = kgv_rows(imported("it0_initial").snapshot.consumers, "formula")
     kgv = by_target(rows, "Kgv")
     # README gives 2 decimals (0.36 / 0.31 / 0.25 / 0.07); Kgv is now rounded to 3.
     assert kgv == {"33553": 0.361, "33559": 0.31, "33561": 0.25, "33567": 0.072}
 
 
 def test_kgv_without_measured_flow_falls_back_to_heat() -> None:
-    rows = kgv_rows(imported("it0_initial").snapshot.consumers)
+    rows = kgv_rows(imported("it0_initial").snapshot.consumers, "formula")
     [row] = [r for r in rows if r.target == "33567"]
     assert row.note == KGV_BY_HEAT_NOTE == "по теплу (расход не измерен)"
     others = [r for r in rows if r.target != "33567"]
@@ -87,12 +99,14 @@ def test_kgv_without_measured_flow_falls_back_to_heat() -> None:
 
 
 def test_kgv_within_tolerance_is_not_changed() -> None:
-    rows = kgv_rows(imported("it0_initial").snapshot.consumers)
+    rows = kgv_rows(imported("it0_initial").snapshot.consumers, "formula")
     assert {"33551", "33569", "33573", "33575"}.isdisjoint({r.target for r in rows})
 
 
 def test_step1_result_on_initial_state(fact) -> None:
-    res = step1(imported("it0_initial").snapshot, fact, t22_niz=59.0, t12_verh=57.5)
+    res = step1(
+        imported("it0_initial").snapshot, fact, t22_niz=59.0, t12_verh=57.5, kgv_mode="formula"
+    )
     ctp = {r.field: (r.current, r.enter) for r in res.rows if r.target == "ЦТП"}
 
     assert ctp["T12_i_niz"] == (40, 57.2)

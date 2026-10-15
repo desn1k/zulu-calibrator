@@ -203,7 +203,7 @@ def step_view(project: Project) -> dict[str, Any]:
         "t12_verh": settings.get("t12_verh"),
         "t_o": settings.get("t_o"),
         "kso_exception": bool(settings.get("kso_exception")),
-        "kgv_mode": settings.get("kgv_mode") or "formula",
+        "kgv_mode": settings.get("kgv_mode") or "auto",
         "circulation": settings.get("circulation") or "",
         "layer": settings.get("layer") or DEFAULT_LAYER,
         "washers_first": bool(settings.get("washers_first")),

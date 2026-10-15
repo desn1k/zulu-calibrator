@@ -2,6 +2,7 @@
 
 from app.engine.criteria import (
     by_temp,
+    by_tol,
     criteria_step1,
     criteria_step2,
     criteria_step3,
@@ -120,3 +121,13 @@ def test_return_temperature_by_delta_t_when_supply_differs() -> None:
     assert c.passed  # ΔT 32.1 vs 31.0 = +3.5 %
     assert round(c.model, 2) == 32.1 and round(c.fact, 1) == 31.0
     assert "первый контур / прибор" in c.note
+
+
+def test_flow_criteria_hard_4_percent_soft_2_percent() -> None:
+    ok = by_tol("G", "G", 101.5, 100.0)
+    assert ok.passed and not ok.off_target and ok.target == 2.0 and ok.limit == 4.0
+    warn = by_tol("G", "G", 103.0, 100.0)  # +3 %: passes the step, warning only
+    assert warn.passed and warn.off_target
+    assert "±4 % (цель ±2 %)" in warn.title
+    fail = by_tol("G", "G", 104.5, 100.0)
+    assert not fail.passed and not fail.off_target

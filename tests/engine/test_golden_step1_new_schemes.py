@@ -31,8 +31,9 @@ CH_KGV = {
 
 def test_chernyshevskogo_kgv_by_model_flow_from_it2() -> None:
     snap, fact = zulu(CH, "it2_step1a_inlet_washer_200")
-    res = step1(snap, fact, kgv_mode="model", circulation=False)
+    res = step1(snap, fact, circulation=False)  # automatic rule: every object is alive
     kgv = by_target(res.rows, "Kgv")
+    assert all("ГВС в модели жива" in r.note for r in res.rows if r.field == "Kgv")
     assert kgv.keys() == CH_KGV.keys()  # all 13 objects (each off by more than 4 %)
     for sys, expected in CH_KGV.items():
         assert near(kgv[sys], expected, 0.01), sys
@@ -54,18 +55,18 @@ def test_chernyshevskogo_sequential_stages_from_it0() -> None:
 
 
 def test_chernyshevskogo_stage2_tuned_by_dhw_temperature() -> None:
-    # README: 0.083 → 0.31 → 0.385, Q_i_verh_new = Q_i_verh · Q_needed / Q_verh.
-    snap, fact = zulu(CH, "it5_step5_washers_round2_stage2_on")
-    res = step1(snap, fact, t12_verh=60, circulation=False)
-    v = ctp(res)
-    assert set(v) == {"Q_i_verh"}  # stage I and stage II temperatures are already right
-    assert near(v["Q_i_verh"], 0.31, 0.01)
-
+    # Q_i_verh_new = Q_i_verh · Q_needed / Q_verh, Q_needed with the MODEL flow through stage II
+    # (approved 2026-10-15). From it6: G2_verh 8.675 → 0.385 (README).
     snap, fact = zulu(CH, "it6_step4_kso")
     v = ctp(step1(snap, fact, t12_verh=60, circulation=False))
-    # Q_needed with the target flow 8.5 gives 0.377; the session used the model flow 8.675
-    # (0.385). Difference −2 % — reported in HANDOFF.
-    assert near(v["Q_i_verh"], 0.385, 0.025)
+    assert set(v) == {"Q_i_verh"}  # stage I and stage II temperatures are already right
+    assert near(v["Q_i_verh"], 0.385, 0.01)
+
+    # From it5 the session entered 0.31 (computed with the target 8.5 while the cold DHW
+    # inflated the model flow to 9.248); the approved rule gives 0.083·9.248·8.7/1000/0.0198.
+    snap, fact = zulu(CH, "it5_step5_washers_round2_stage2_on")
+    v = ctp(step1(snap, fact, t12_verh=60, circulation=False))
+    assert near(v["Q_i_verh"], 0.083 * 9.248 * (65.8 - 57.1) / 1000 / 0.0198, 0.005)
 
     snap, fact = zulu(CH, "it7_step4_kso_finetune")
     res = step1(snap, fact, t12_verh=60, circulation=False)
@@ -89,7 +90,8 @@ def test_beregovaya_parallel_dhw_and_heating_hx_from_it0() -> None:
     assert "T22_i_niz" in v and v["T22_i_niz"] == 61.3
     assert v["Hgv2_obr"] == 112.3  # H_geo 27.3 + P2_GVS 85
     assert "Hgv2_ras" not in ctp(res)  # P1 − P2 = 1.8 already
-    assert by_target(res.rows, "Kgv") == {"21311": 0.474}
+    assert by_target(res.rows, "Kgv") == {"21311": 0.474}  # DHW 23 °C in the model → 1.3
+    assert "ГВС в модели не работает" in next(r.note for r in res.rows if r.field == "Kgv")
     assert res.shown["Gгв"] == pytest.approx(2.37, abs=0.005)
     assert any("датчик T2 ЦТП не берём" in n for n in res.notes)
 
@@ -103,7 +105,7 @@ VER_KGV = {"28435": 0.658, "28441": 0.330, "28443": 0.205, "28474": 0.373, "2847
 
 def test_verkhnyaya_mixed_dead_end_dhw_from_it0() -> None:
     snap, fact = zulu(VER, "it0_initial")
-    res = step1(snap, fact, t22_niz=26, kgv_mode="model")
+    res = step1(snap, fact, t22_niz=26)  # automatic rule: alive; Tgv 60 → 62.7 in the same run
     v = ctp(res, snap)
     assert (v["T11_i_niz"], v["T12_i_niz"], v["T21_i_niz"], v["T22_i_niz"]) == (55.6, 54.2, 5, 26)
     assert v["Q_i_niz"] == 0.095
@@ -134,3 +136,5 @@ def test_pionerskaya_dhw_heat_target_and_kgv_from_it0() -> None:
     assert ctp(res, snap)["T21_i_niz"] == 22.7
     kgv = by_target(res.rows, "Kgv")
     assert kgv == {"33648": 0.294, "33650": 0.461, "33652": 0.278}  # 33648: CTP meter rest 0.9
+    # Tgv_t 18–19 °C in the model (junk HX parameters) → formula 1.3 for every object
+    assert all("ГВС в модели не работает" in r.note for r in res.rows if r.field == "Kgv")

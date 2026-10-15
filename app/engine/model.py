@@ -154,3 +154,14 @@ class Criterion:
     unit: Literal["%", "°C", ""]
     passed: bool
     note: str = ""  # e.g. «первый контур / прибор» when a temperature is judged by ΔT
+    target: float | None = None  # soft step target (warning only), e.g. ±2 % under a hard ±4 %
+
+    @property
+    def off_target(self) -> bool:
+        """Within the hard limit but outside the step target: a warning, not a block."""
+        return (
+            self.passed
+            and self.target is not None
+            and self.deviation is not None
+            and abs(self.deviation) > self.target + 1e-9
+        )

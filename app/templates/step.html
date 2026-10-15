@@ -39,8 +39,9 @@
     </label>
     <label>Kgv
       <select name="kgv_mode">
-        <option value="formula" {% if settings.kgv_mode == "formula" %}selected{% endif %}>по Tgv объекта (формула 1.3)</option>
-        <option value="model" {% if settings.kgv_mode == "model" %}selected{% endif %}>по расходу модели: Kgv·(G1 − G2)ф / Ggv</option>
+        <option value="auto" {% if settings.kgv_mode == "auto" %}selected{% endif %}>автоматически по каждому объекту</option>
+        <option value="formula" {% if settings.kgv_mode == "formula" %}selected{% endif %}>всегда формула 1.3 (по Tgv объекта)</option>
+        <option value="model" {% if settings.kgv_mode == "model" %}selected{% endif %}>всегда по расходу модели: Kgv·(G1 − G2)ф / Ggv</option>
       </select>
     </label>
     <button type="submit">Пересчитать</button>
@@ -139,18 +140,23 @@
 {% endif %}
 
 <h2>Критерии шага</h2>
+<p class="muted small">Расходы, тепло, перепады давления: допуск ±4 % (иначе шаг не сходится), цель шага ±2 % —
+  только предупреждение.</p>
+{% if view.criteria|selectattr("off_target")|list %}
+<p class="warning">В допуске ±4 %, но вне цели шага ±2 %: {{ view.criteria|selectattr("off_target")|map(attribute="title")|join("; ") }}. Можно идти дальше.</p>
+{% endif %}
 {% if view.criteria %}
 <table class="criteria">
   <thead><tr><th>Критерий</th><th>Модель</th><th>Факт</th><th>Откл.</th><th>Допуск</th><th>Итог</th></tr></thead>
   <tbody>
     {% for c in view.criteria %}
-    <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
+    <tr class="{% if c.off_target %}warn{% elif c.passed %}pass{% else %}fail{% endif %}">
       <td>{{ c.title }}{% if c.note %} <span class="tag">{{ c.note }}</span>{% endif %}</td>
       <td>{{ c.model|ru(c.key|value_digits) }}</td>
       <td>{{ c.fact|ru(c.key|value_digits) }}</td>
       <td>{% if c.deviation is not none %}{{ c.deviation|ru(1) }} {{ c.unit }}{% endif %}</td>
       <td>{% if c.limit %}±{{ c.limit|ru }} {{ c.unit }}{% endif %}</td>
-      <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
+      <td>{% if c.off_target %}сошлось, вне цели ±{{ c.target|ru }} %{% elif c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>

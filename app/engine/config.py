@@ -10,10 +10,10 @@ TOLERANCE_PCT = 4.0  # flows, heat, pressure drops: ±4 % at most
 # otherwise ±4 % on ΔT (supply − return) and the absolute T2 shift is «первый контур / прибор».
 TEMP_TOLERANCE_PCT = 4.0
 TEMP_SUPPLY_MATCH_C = 1.0
+# Every flow / heat / pressure-drop criterion: hard ±4 % (blocks the step), step target ±2 %
+# (a warning, not a block) — APPROVED 2026-10-15.
 STEP_FLOW_TARGET_PCT = 2.0  # «Цель шага — расход ±2 %»
 ESTIMATED_BLOCK_TOLERANCE_PCT = 7.0  # restored («расчётный») CTP block: an estimate — APPROVED
-MULTI_INPUT_GROUP_PCT = 2.0  # multi-input house: sum of the group
-MULTI_INPUT_EACH_PCT = 4.0  # multi-input house: each input — APPROVED 2026-10-15
 
 # Meter checks 1–11 («Входные данные и проверка приборов»)
 CHECK_HEAT_CLOSE_PCT = 2.0  # checks 1, 2 «близко / ≈» — APPROVED
@@ -32,16 +32,15 @@ STEP1_T12_VERH_MIN_GAP = 2.0  # T12_verh ≥ T21_verh + 2
 STEP1_T22_NIZ_GAP = 2.0  # T22_niz 1.5–2 °C below T11_niz; default suggestion uses 2
 STEP1_HEATING_TEMP_C = 0.7  # T3so_t / T2so_t ±0.7 °C
 STEP1_T11_NIZ_NOT_T1_C = 1.0  # «T11_niz ≈ расчётному (не T1)»: not within 1 °C of T1 — APPROVED
-# Kgv only where the draw-off differs by more than this. algorithm 1.3 says 10 %; the approved
-# tolerance of 2026-10-15 caps every flow at ±4 % — QUESTION to Andrew (see HANDOFF).
-KGV_DRAW_OFF_DIFF_PCT = 4.0
+KGV_DRAW_OFF_DIFF_PCT = 4.0  # Kgv only where the draw-off differs by more — APPROVED 2026-10-15
 KGV_NO_FLOW_T_H = 0.05  # G1_GVS − G2_GVS ≤ 0.05 t/h → Kgv by heat (approved method change)
 
-STEP1_DHW_TEMP_C = 1.0  # T DHW at the CTP outlet vs the meter (scheme 12 stage II) — QUESTION
-KGV_MODEL_T_MIN_C = 40.0  # «по расходу модели» needs a warm model DHW at the object
-DHW_HOUSES_AGREE_PCT = (
-    10.0  # building DHW sum «agrees» with the CTP balance (as check 7) — QUESTION
-)
+STEP1_DHW_TEMP_C = 1.0  # T DHW at the CTP outlet vs the meter — APPROVED 2026-10-15
+KGV_ALIVE_GAP_C = 10.0  # DHW alive: Tgv_t ≥ T1_GVS (or Tgv) − 10 °C — APPROVED 2026-10-15
+# Building DHW sum «agrees» with the CTP balance (as check 7). Not ±4 %: on Чернышевского the
+# buildings are −8.8 % from the balance (DHW network losses) and the rule would not fire — PR-4
+# description lists it.
+DHW_HOUSES_AGREE_PCT = 10.0
 PARALLEL_TO_START_GAP = 4.0  # parallel DHW, independent heating: Tо search starts at T21_i + 4
 PARALLEL_TO_STEP = 0.5  # … in 0.5 °C steps
 MIXED_T12_VERH_DEFAULT = 40.0  # scheme 5: T12_verh free parameter, default 40
@@ -49,22 +48,22 @@ DEAD_END_HGV2_RAS = 2.0  # dead-end DHW: Hgv2_ras default (Верхняя, 24)
 HGV2_SUM_TOL_M = 0.5  # dead-end: leave Hgv2 when the sum is already within 0.5 m
 
 CTP_RETURN_SENSOR_GAP_C = 2.0  # one building: CTP T2 colder than the building outlet by > 2 °C
-CHANNEL_FACTOR_MAX_DIFF_PCT = 25.0  # flow channel: unmetered load factor vs metered — QUESTION
+# Flow channel: load factor of the unmetered buildings vs the metered ones. Not ±4 %: the valid
+# channel of Верхняя is ×1.27 vs ×1.22 (+4.1 %); the rejected ones are ×0.07 — PR-4 description.
+CHANNEL_FACTOR_MAX_DIFF_PCT = 25.0
 
 # Step 2
 STEP2_GCIRC_PCT = 10.0
 STEP2_TCIRC_C = 1.5
 HCIRC_PLACEHOLDER = 0.1
 # Gcirc matches and the model loop cooling is at least this share of the target → keep Kcirc /
-# Hcirc and tune Tcirc only (Береговая); otherwise step 2 (Огородная) — QUESTION
+# Hcirc and tune Tcirc only (Береговая 12.8 of 15.0 °C); otherwise step 2 (Огородная 1.7 of
+# 12 °C). Not a deviation — PR-4 description lists it.
 STEP2_TCIRC_ONLY_COOLING_SHARE = 0.5
 
 # Step 3 and 5
-INLET_FLOW_PCT = 2.0  # G ввода ±2 %
+INLET_FLOW_PCT = 2.0  # step 3: leave the inlet washer when G ввода is within the step target
 WASHER_CHANGE_PCT = 2.0  # change a building washer only if |Gm/Gf − 1| > 2 %
-HOUSE_FLOW_PCT = 2.0  # step 5: Gso each house ±2 %
-CTP_SECOND_CIRCUIT_FLOW_PCT = 1.0  # step 5: Gsum_pod2 ±1 %
-STEP1_SECOND_CIRCUIT_FLOW_PCT = 2.0  # step 1: Gsum_pod2 ±2 %
 MIN_WASHER_MM = 3.0
 MIN_FORECAST_HEAD_M = 4.0  # forecast head below → pipe data suspect (Верхняя, 24)
 MIN_ELEVATOR_WASHER_DH_M = 0.5  # elevator: less head for a washer → remove it, size the nozzle
@@ -72,7 +71,6 @@ HEAD_POINTS_MIN_DG_PCT = 1.0  # two H(G) points need flows at least 1 % apart
 STEPS_5_BEFORE_4_PCT = 20.0  # «Порядок 4 и 5»: house flows off by > 20 % → washers first
 
 # Step 4
-HOUSE_HEAT_PCT = 4.0  # Q_sum each house ±4 % — APPROVED 2026-10-15
 
 # Rounding of values to enter in Zulu
 ROUND_T = 1  # °C

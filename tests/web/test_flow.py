@@ -99,7 +99,9 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert resp.headers["location"] == f"/projects/{pid}/steps/1"
 
     # Step 1 on it0, with the free parameters of the real session (README: 59 / 57.5)
-    client.post(f"/projects/{pid}/steps/1/settings", data={"t22_niz": "59", "t12_verh": "57,5"})
+    # Kgv: the Огородная session used formula 1.3 (manual override of the automatic rule)
+    client.post(f"/projects/{pid}/steps/1/settings",
+                data={"t22_niz": "59", "t12_verh": "57,5", "kgv_mode": "formula"})  # fmt: skip
     text = page(client, f"/projects/{pid}/steps/1")
     for value in ("57,2", "60,9", "61,1", "0,362", "0,178", "92,8"):
         assert value in text

@@ -185,11 +185,26 @@ def suggest_free_params(fact: CtpFact) -> tuple[float, float]:
     return t22_niz, t12_verh
 
 
-KgvMode = Literal["formula", "model"]
+KgvMode = Literal["auto", "formula", "model"]
 KGV_MODE_TITLES = {
-    "formula": "по Tgv объекта (формула 1.3)",
-    "model": "по расходу модели: Kgv·(G1 − G2)ф / Ggv",
+    "auto": "автоматически: по расходу модели, если ГВС в модели жива, иначе формула 1.3",
+    "formula": "всегда формула 1.3 (по Tgv объекта)",
+    "model": "всегда по расходу модели: Kgv·(G1 − G2)ф / Ggv",
 }
+KGV_ALIVE_NOTE = "ГВС в модели жива: по расходу модели"
+KGV_DEAD_NOTE = "ГВС в модели не работает: формула 1.3"
+
+
+def dhw_alive(c: Consumer, meter_t1: float | None) -> bool:
+    """«DHW alive» in the model run (approved 2026-10-15): Ggv > 0 and Tgv_t ≥ (T1_GVS of the
+    meter, or Tgv without a meter) − 10 °C. A cold DHW (junk HX parameters) is not alive."""
+    ggv, t_model = c.num("Ggv"), c.num("Tgv_t")
+    if t_model is None:
+        t_model = c.num("T1_t")
+    ref = meter_t1 if meter_t1 is not None else c.num("Tgv")
+    if not ggv or ggv <= 0 or t_model is None or ref is None:
+        return False
+    return t_model >= ref - config.KGV_ALIVE_GAP_C
 
 
 def unmetered_dhw_draw(consumers: list[Consumer], ctp_supply: float | None) -> dict[int, float]:
@@ -218,17 +233,19 @@ def model_dhw_temperature(c: Consumer, thv: float) -> float | None:
 
 def kgv_rows(
     consumers: list[Consumer],
-    mode: KgvMode = "formula",
+    mode: KgvMode = "auto",
     t_shift: float = 0.0,
     ctp_supply: float | None = None,
 ) -> list[Recommendation]:
     """1.3: Kgv of DHW objects where the model draw-off differs from the house meter by more than
     the tolerance.
 
-    - «formula» (algorithm 1.3): Kgv = (G1 − G2)·(Tgv − Thv)/(1000·Qgv_sred);
-    - «model» (example Чернышевского, approved 2026-10-15): Kgv·(G1 − G2)ф / Ggv — the model
-      draw-off at the model DHW temperature of the object, i.e. (G1 − G2)·(T1_t − Thv)/
-      (1000·Qgv_sred); `t_shift` adds the change of the CTP Tgv entered in the same run.
+    - «auto» (approved 2026-10-15), per object: DHW alive in the model run (Ggv > 0 and
+      Tgv_t ≥ T1_GVS − 10 °C) → Kgv·G_цель/Ggv (Zulu's real response); not alive → formula 1.3;
+      the branch is shown on the row;
+    - «formula» (algorithm 1.3): Kgv = G_цель·(Tgv − Thv)/(1000·Qgv_sred);
+    - «model»: always Kgv·G_цель/Ggv.
+    `t_shift` — the change of the CTP Tgv entered in the same run (model branch).
     Draw-off not measured (G1 − G2 ≤ 0.05 t/h or missing): Kgv = Q_GVS / Qgv_sred, «по теплу
     (расход не измерен)». An unmetered object gets the rest of the CTP DHW supply meter.
     """
@@ -267,19 +284,25 @@ def kgv_rows(
             )  # fmt: skip
             continue
 
+        alive = dhw_alive(c, m.T1 if m is not None else None)
+        use_model = mode == "model" or (mode == "auto" and alive)
+        branch = (KGV_ALIVE_NOTE if alive else KGV_DEAD_NOTE) if mode == "auto" else ""
+        note = "; ".join(x for x in (note, branch) if x)
         t_obj = model_dhw_temperature(c, thv)
-        if mode == "model" and t_obj is not None and t_obj >= config.KGV_MODEL_T_MIN_C:
-            model_draw = c.num("Ggv") or 1000.0 * qgv_sred * kgv / (t_obj - thv)
+        if use_model and c.num("Ggv") and t_obj is not None and t_obj > thv:
+            model_draw = c.num("Ggv")
             if abs(model_draw / draw - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT and not t_shift:
                 continue
-            # Kgv·Gф/Ggv; with a new CTP Tgv the model draw-off falls by (T − Thv)/(T + ΔT − Thv).
+            # Kgv·G_цель/Ggv: Zulu takes the draw-off from heat at the delivered temperature. With a
+            # new CTP Tgv in the same run that temperature rises by ΔT and the draw-off falls by
+            # (T − Thv)/(T + ΔT − Thv).
             new = kgv * draw / model_draw * (t_obj + t_shift - thv) / (t_obj - thv)
             shift = f" (+{t_shift:.1f} °C: новая Tgv ЦТП)" if t_shift else ""
             rows.append(
                 Recommendation(
                     str(c.sys), "Kgv", c.get("Kgv"), round(new, config.ROUND_KGV),
-                    f"1.3 по расходу модели: Kgv·Gф/Ggv, разбор модели {model_draw:.2f} т/ч "
-                    f"при T ГВС {t_obj:.1f}{shift} против {draw:.2f} т/ч",
+                    f"1.3: Kgv·Gф/Ggv = {kgv:g}·{draw:.2f}/{model_draw:.3f} (T ГВС в модели "
+                    f"{t_obj:.1f}{shift})",
                     note=note,
                 )
             )  # fmt: skip
@@ -292,7 +315,8 @@ def kgv_rows(
         rows.append(
             Recommendation(
                 str(c.sys), "Kgv", c.get("Kgv"), new,
-                f"1.3: разбор модели {model_draw:.2f} т/ч против {draw:.2f} т/ч",
+                f"1.3: (G1 − G2)·(Tgv − Thv)/(1000·Qgv_sred), разбор модели {model_draw:.2f} т/ч "
+                f"против {draw:.2f} т/ч",
                 note=note,
             )
         )  # fmt: skip
@@ -305,7 +329,7 @@ class Step1Result(StepResult):
     t2_meter: float | None = None
     dhw_target: DhwTarget | None = None
     shown: dict[str, float] = field(default_factory=dict)  # Gр, Gп, Tо, Gгв … for the page
-    kgv_mode: str = "formula"
+    kgv_mode: str = "auto"
 
 
 def houses_draw_off(consumers: list[Consumer]) -> float:
@@ -348,7 +372,7 @@ def step1(
     t12_verh: float | None = None,
     draw_off_source: Literal["houses", "ctp"] = "houses",
     *,
-    kgv_mode: KgvMode = "formula",
+    kgv_mode: KgvMode = "auto",
     circulation: bool | None = None,
     t_o: float | None = None,
 ) -> Step1Result:
@@ -537,21 +561,23 @@ def stage2_tuning(res: Step1Result, snap: Snapshot, target: DhwTarget) -> None:
     t_out, tgv = snap.card_num("T22_verh"), target.t_supply
     q_i, q_model = snap.card_num("Q_i_verh"), snap.card_num("Q_verh")
     t21 = snap.card_num("T21_verh")
-    if None in (t_out, q_i, q_model, t21):
+    g_model = snap.card_num("G2_verh")  # model flow through stage II
+    if None in (t_out, q_i, q_model, t21) or not g_model:
         return
     if abs(t_out - tgv) <= config.STEP1_DHW_TEMP_C:
         res.notes.append(f"T ГВС на выходе ЦТП {t_out:g} против {tgv:g} °C — II ступень сошлась.")
         return
-    new = stage2_correction(q_i, q_model, target.supply, tgv, t21)
+    new = stage2_correction(q_i, q_model, g_model, tgv, t21)
     if new is None:
         res.questions.append("II ступень не работает (Q_verh = 0) — проверить испытательные.")
         return
-    q_needed = target.supply * (tgv - t21) / 1000.0
+    q_needed = g_model * (tgv - t21) / 1000.0
     res.rows.append(
         Recommendation(
             CTP_TARGET, "Q_i_verh", q_i, round(new, config.ROUND_Q),
             f"II ступень: T ГВС {t_out:g} против {tgv:g} °C; Q_i_verh·Q_нужно/Q_verh = "
-            f"{q_i:g}·{q_needed:.4f}/{q_model:g}",
+            f"{q_i:g}·{q_needed:.4f}/{q_model:g}, Q_нужно = G_модели {g_model:g}·"
+            f"({tgv:g} − {t21:g})/1000",
         )
     )  # fmt: skip
 

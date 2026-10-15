@@ -112,3 +112,4 @@ form.inline-form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 .legend .note { background: var(--note-bg); }
 .legend .question { background: var(--warn-bg); }
 .legend .flag { background: var(--fail-bg); }
+tr.warn td:last-child { background: var(--warn-bg); }

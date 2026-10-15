@@ -139,3 +139,13 @@ def test_scheme_registry_initial_state_and_warning(client: TestClient) -> None:
         session.commit()
     text = page(client, f"/projects/{pid}/steps/1")
     assert "Схема ЦТП 12 не откалибрована" in text
+
+
+def test_off_target_criterion_is_a_warning_not_a_block(client: TestClient) -> None:
+    pid = start(client, "it7_step4_kso_finetune")
+    for step in ("1", "2", "3", "4"):
+        client.post(f"/projects/{pid}/steps/{step}/accept", data={"comment": "тест"})
+    text = page(client, f"/projects/{pid}/steps/5")
+    # Gsum_pod2 130.5 vs 128.5 (+1.6 %) passes; inlet-side warnings may show for other rows
+    assert "Gsum_pod2 ЦТП ±4 % (цель ±2 %)" in text
+    assert "только предупреждение" in text

@@ -30,7 +30,6 @@ CH_ROUND2_SO = {
     40490: 13.2,
 }  # fmt: skip
 CH_ROUND2_POD = {27992: 11.5, 28018: 7.1, 28026: 15.4, 28040: 13.9}
-CH_LOSS = 0.02  # README value; Qut_pod + Qut_obr + Qut_potr of the card is 0.029 («уточнить»)
 
 
 def test_chernyshevskogo_unmetered_heating_target_from_it3() -> None:
@@ -67,7 +66,11 @@ def test_chernyshevskogo_kso_from_it5_and_fine_tune_from_it6() -> None:
          {"27992": 0.882, "28018": 0.671, "28026": 0.859, "28040": 0.851}, 1.102, 1.0194),
     ):  # fmt: skip
         snap, fact = zulu(CH, it)
-        i = step_inputs(snap, fact, loss=CH_LOSS)
+        # loss = Qut_pod + Qut_obr + Qut_potr of the card of the same run (0.029 / 0.030; the
+        # README used 0.02) → k 1.0963 / 1.0159, within the Kso tolerance of the README values
+        i = step_inputs(snap, fact)
+        assert i.loss == pytest.approx(sum(snap.card_num(f) for f in ("Qut_pod", "Qut_obr",
+                                                                        "Qut_potr")))  # fmt: skip
         res = step4(snap, i.targets, kso_exception=True, q_heating=i.validity.q_heating,
                     loss=i.loss)  # fmt: skip
         kso = by_target(res.rows, "Kso")
@@ -75,9 +78,10 @@ def test_chernyshevskogo_kso_from_it5_and_fine_tune_from_it6() -> None:
             assert close(kso[sys], value, 0.005), (it, sys)
         for sys in ("28030", "40488", "40490"):
             assert close(kso[sys], group, 0.005), (it, sys)
-        assert res.unmetered_factor == pytest.approx(k, abs=0.0005)
-        kso_27966 = snap.consumer(27966).num("Kso")
-        assert close(kso["27966"], kso_27966 * k, 0.005)
+        assert close(res.unmetered_factor, k, 0.005)
+        for c in snap.consumers:  # every unmetered input: Kso·k within 0.5 % of Kso·k_README
+            if c.sys in {t.sys for t in i.targets.flows.values() if t.source == "remainder"}:
+                assert close(kso[str(c.sys)], c.num("Kso") * k, 0.005), (it, c.sys)
 
 
 def test_chernyshevskogo_no_circulation_skips_step2() -> None:
@@ -258,10 +262,14 @@ def test_pionerskaya_kso_by_group_meters_and_a8_fine_tune() -> None:
     i = step_inputs(snap, fact, group_meters=pi_meters(snap))
     res = step4(snap, i.targets, kso_exception=True, q_heating=i.validity.q_heating, loss=i.loss)
     kso = by_target(res.rows, "Kso")
+    # a8 (33636 / 40387): the session's first Kso 0.925 was an estimate, not reproducible from it0
+    # (its inputs had Kso 1.3 / 1.0) — not asserted.
     assert close(kso["33638"], 0.784, 0.005) and close(kso["40398"], 0.784, 0.005)
     assert close(kso["33640"], 0.749, 0.005) and close(kso["40383"], 0.749, 0.005)
 
-    # a8 fine-tune from it2 with the README heat target ≈ 0.42 (loss chosen to give exactly 0.42)
+    # a8 fine-tune from it2 with the README heat target ≈ 0.42 (loss chosen to give exactly 0.42).
+    # With the card loss of the same run (0.0106; the it0–it3 cards are missing, the it4 card is
+    # used) the target is 0.4164 and Kso 0.9675 (−0.9 %) — reported in the PR.
     snap, fact = zulu(PI, "it2_step5_supply_washers_regul_test")
     i = step_inputs(snap, fact, group_meters=pi_meters(snap), loss=1.54 - 0.592 - 0.521 - 0.42)
     res = step4(snap, i.targets, kso_exception=True, q_heating=i.validity.q_heating, loss=i.loss)

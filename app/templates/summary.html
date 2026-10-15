@@ -20,12 +20,12 @@
   <thead><tr><th>Что</th><th>Модель</th><th>Факт</th><th>Откл.</th><th>Итог</th></tr></thead>
   <tbody>
     {% for c in rows %}
-    <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
+    <tr class="{% if c.off_target %}warn{% elif c.passed %}pass{% else %}fail{% endif %}">
       <td>{{ c.title }}{% if c.note %} <span class="tag">{{ c.note }}</span>{% endif %}</td>
       <td>{{ c.model|ru(c.key|value_digits) }}</td>
       <td>{{ c.fact|ru(c.key|value_digits) }}</td>
       <td>{% if c.deviation is not none %}{{ c.deviation|ru(1) }} {{ c.unit }}{% endif %}</td>
-      <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
+      <td>{% if c.off_target %}сошлось, вне цели ±{{ c.target|ru }} %{% elif c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>

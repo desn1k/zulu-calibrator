@@ -162,7 +162,8 @@ def step5(
     res = StepResult(step="5", do_not_touch=list(STEP5_DO_NOT_TOUCH))
     scheme = ctp_scheme(snap.card.get("N_schem"))
     if scheme is None or scheme.heating == "independent":
-        # With CTP pumps the house heads are wrong until the inlet is right (within the tolerance).
+        # With CTP pumps the house heads are wrong until the inlet is within ±4 % (APPROVED
+        # 2026-10-15: Береговая sized the washer at −2.4 %).
         dev = inlet_deviation_pct(snap, fact)
         if dev is None or abs(dev) > config.TOLERANCE_PCT:
             shown = "нет данных" if dev is None else f"{dev:+.1f} %"

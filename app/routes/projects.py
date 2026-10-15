@@ -509,9 +509,9 @@ async def step_settings(
                 raise StepError("Имя слоя: без скобок, кавычек и «;».", 400)
             svc.update_settings(session, project, layer=layer)
         elif step == "1":
-            kgv_mode = str(form.get("kgv_mode") or "formula")
+            kgv_mode = str(form.get("kgv_mode") or "auto")
             circulation = str(form.get("circulation") or "")
-            if kgv_mode not in ("formula", "model") or circulation not in ("", "yes", "no"):
+            if kgv_mode not in ("auto", "formula", "model") or circulation not in ("", "yes", "no"):
                 raise StepError("Неизвестное значение настройки.", 400)
             svc.update_settings(
                 session, project,

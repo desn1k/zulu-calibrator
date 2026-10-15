@@ -21,12 +21,13 @@
     remainder by Kso·Qo_r; Kso factors, unmetered k), `hydraulics.py` (washer ΔH, two H(G) points,
     house head forecast), `inputs.py`, `run_warnings.py` (inlet washer plug, washer changed between
     runs), `sql.py` (Zulu UPDATE batch / one by one, `Nshb = 0` fix).
-  - Steps: step 1 per scheme (Kgv «по Tgv объекта» / «по расходу модели», an unmetered DHW object
+  - Steps: step 1 per scheme (Kgv automatic per object: alive → by model flow, else 1.3; an unmetered DHW object
     gets the CTP meter rest), step 2 (skipped without circulation; Gcirc check + Tcirc from two
     runs), step 4 (one Kso per building, unmetered k, cross-check, «сначала шаг 5»), step 5 (targets
     for every input, two H(G) points for a second round, series washers, return washer as the lever,
     elevators, forecast head below 4 m).
-  - Tolerances ±4 % + temperature rule (`criteria.by_temp`); step order 5 before 4 per project.
+  - Tolerances: hard ±4 % / step target ±2 % warning (`criteria.by_tol`), temperature rule
+    (`criteria.by_temp`); step order 5 before 4 per project.
   - Scheme registry table `scheme_status` (migration 0003) seeded as calibrated: CTP 2, 3, 5, 6, 12,
     consumers 2, 4, 26; the step page warns about uncalibrated schemes. The registry page and
     «подтвердить» are still to do (PR-9).
@@ -36,36 +37,47 @@
   second contour (section «Давления второго контура», task 3c of PROMPT_PR-5) + the roughness band
   check (bands go to `config.py` together with the check).
 
-### Open questions for Andrew (PR-4)
+### Andrew's decisions on PR-4 (2026-10-15) and what is still open
 
-Values marked `QUESTION` in `app/engine/config.py` are my choices where the method gives no number.
+Decided and applied:
 
-1. Kgv: formula 1.3 (Tgv of the object) is the default; «по расходу модели»
-   (Kgv·(G1 − G2)ф/Ggv, plus the Tgv change entered in the same run) is a step 1 setting.
-   Чернышевского and Верхняя golden values need «по модели», Огородная / Береговая / Пионерская need
-   1.3 — no single automatic rule reproduces all five. Which default?
-2. `KGV_DRAW_OFF_DIFF_PCT` 10 → 4 %: algorithm 1.3 says 10 %, the new tolerance caps flows at 4 %
-   (Чернышевского changed all 13 objects, 28108 was +8.9 %). Kgv now has 3 decimals.
-3. Stage II (scheme 12): Q_needed = Gп(target)·(Tгв − T21_verh)/1000 reproduces 0.31 exactly; from
-   it6 it gives 0.377 vs README 0.385 (the session used the model flow 8.675).
-4. `STEP1_DHW_TEMP_C` 1 °C (T DHW at the CTP outlet), `DHW_HOUSES_AGREE_PCT` 10 % (building sum
-   «agrees» with the CTP balance), `CHANNEL_FACTOR_MAX_DIFF_PCT` 25 %,
-   `STEP2_TCIRC_ONLY_COOLING_SHARE` 0.5 (Gcirc matches and the model loop cooling ≥ ½ of the target
-   → Tcirc only, as on Береговая; otherwise step 2 as on Огородная).
-5. Источник потерь уточнить: Qut_pod + Qut_obr + Qut_potr = 0.013 on Верхняя (as README) but 0.029
-   on Чернышевского vs README 0.02 (the golden test uses 0.02 as an input). Qut_potr alone is 0.019.
-6. Пионерская a8: the first Kso 0.925 (its inputs had Kso 1.3 / 1.0) is not reproduced; the
-   fine-tune 0.976 is, with the README target 0.42 (the card loss 0.0106 would give 0.9675).
-7. Regul_T = 1 is not recommended for scheme 12 (the session kept 0 and tuned stage II by Q_i_verh).
-8. Step 5 with CTP pumps (independent heating) waits for the inlet within ±4 % (was ±2 %; Береговая
-   sized the washer at −2.4 %). The step 3 criterion stays ±2 %.
-9. Step 5 criterion «Gsum_pod2 ЦТП ±1 %» (algorithm) fails on every final state of the new sets
-   (+1.6 … −2.1 %) — keep, or ±2 / ±4 %?
-10. A multi-input building with one meter: the flow target is split by model flow (task); the GUID
-    section of the algorithm says Qo_r (user shares still override). One Kso per building.
-11. Hsec_niz 0.4 (Чернышевского run 1): no rule found, not recommended.
-12. Known Regul_G / Regul_T labels: «Без регулятора», «Регулятор температуры». Any other label stops
-    the import with a message — send new labels to add their codes.
+- Kgv per DHW object, automatically: «DHW alive» = Ggv > 0 and Tgv_t ≥ (T1_GVS of the meter, or
+  Tgv) − 10 °C → Kgv·G_цель/Ggv; not alive → formula 1.3. The branch is shown on each row; the step 1
+  setting can force either formula. Чернышевского / Верхняя → alive, Пионерская / Береговая → not.
+- Kgv threshold 4 % (algorithm 1.3 updated), 3 decimals.
+- Stage II (scheme 12): Q_нужно with the MODEL flow through stage II (G2_verh) → 0.385 from it6.
+- Network loss in the unmetered factor = Qut_pod + Qut_obr + Qut_potr of the card of the same run
+  (closes «источник потерь уточнить»): Верхняя 0.013, Чернышевского 0.029 → k 1.0963 / 1.0159 vs
+  README 1.0997 / 1.0194, within the Kso tolerance.
+- Пионерская a8 first Kso 0.925 — a session estimate, not asserted.
+- Every flow / heat / pressure-drop criterion: hard ±4 % (blocks), step target ±2 % (warning, not a
+  block); algorithm step criteria updated (steps 1, 3, 4, 5 and the multi-input group).
+- DHW outlet temperature within 1 °C; step 5 with CTP pumps waits for the inlet within ±4 %.
+- Огородная step 4 passing with a comment at −4.1 %; ruff skips `tests/fixtures`.
+
+Still open (for Andrew):
+
+1. Огородная under the automatic Kgv rule (all metered objects alive): 33553 0.338 vs 0.361
+   (−6.4 %), 33559 0.295 vs 0.31 (−4.8 %), 33561 0.259 vs 0.25 (+3.6 %); 33567 by heat 0.072
+   unchanged. The golden test pins the manual override «формула 1.3» (the session's choice).
+2. Верхняя under the automatic rule: plain Kgv·G/Ggv gives 0.626 vs 0.658 (−4.9 %). The same run sets
+   Tgv 60 → 62.7, so the model branch scales by (T + ΔT − Thv)/(T − Thv) — Zulu's draw-off at the new
+   delivered temperature; with it every value is within 0.5 %. Kept, to confirm.
+3. Stage II from it5: the approved rule gives 0.337 (model flow 9.248 inflated by the cold DHW);
+   the session entered 0.31 (target 8.5). Not asserted as golden.
+4. Пионерская a8 fine-tune 0.976 is reproduced with the README target 0.42; with the card loss
+   (0.0106, the it4 card — it0–it3 cards are missing) it is 0.9675 (−0.9 %).
+5. Thresholds kept outside the ±4 / ±2 pattern (they would break their own fixtures):
+   `DHW_HOUSES_AGREE_PCT` 10 % (Чернышевского buildings −8.8 % from the CTP balance),
+   `CHANNEL_FACTOR_MAX_DIFF_PCT` 25 % (Верхняя valid channel +4.1 %, rejected ×0.07 vs ×1.22),
+   `STEP2_TCIRC_ONLY_COOLING_SHARE` 0.5 (not a deviation; Береговая 12.8 of 15.0 °C → Tcirc only,
+   Огородная 1.7 of 12 °C → step 2). Step 2 «Gcirc ±10 %» left as in the algorithm.
+6. A multi-input building with one meter: the flow target is split by model flow (task); the GUID
+   section of the algorithm still says Qo_r (user shares override). One Kso per building.
+7. Regul_T = 1 is not recommended for scheme 12 (the session kept 0).
+8. Hsec_niz 0.4 (Чернышевского run 1): no rule found, not recommended.
+9. Known Regul_G / Regul_T labels: «Без регулятора», «Регулятор температуры»; any other label stops
+   the import with a message.
 
 ## Rule before any public deployment
 
@@ -152,12 +164,16 @@ Values marked `QUESTION` in `app/engine/config.py` are my choices where the meth
 - Zulu input: the CTP card is pasted as text, consumers come as an xlsx / csv export; the browser
   reads xlsx with SheetJS (vendored, pinned) so private columns never leave the browser. Real exports
   name the model heat `Qsum` (the old export `Q_sum`); the engine reads both.
-- Tolerances: ±4 % on flows, heat, pressure drops, house heat, each input of a multi-input building;
-  restored CTP block ±7 % (estimate). Temperatures: ±4 % of the value when the model supply is within
+- Tolerances: hard ±4 % on flows, heat, pressure drops (house heat, each input and the whole of a
+  multi-input building, Gsum_pod2, G ввода), step target ±2 % as a warning; restored CTP block ±7 %
+  (estimate). Temperatures: ±4 % of the value when the model supply is within
   1 °C of the meter, otherwise ±4 % on ΔT with the note «первый контур / прибор». Step 1
   «T3so_t / T2so_t ±0,7 °C» kept (independent heating only).
 - Kso: one Kso per building (a multi-input building with one meter); unmetered buildings one factor
-  k = (Q_heating − Σ Q_metered − loss) / Σ Q_model, loss = Qut_pod + Qut_obr + Qut_potr of the card.
+  k = (Q_heating − Σ Q_metered − loss) / Σ Q_model, loss = Qut_pod + Qut_obr + Qut_potr of the card
+  of the same run.
+- Kgv: automatic per DHW object (alive → Kgv·G/Ggv, not alive → 1.3), threshold 4 %, 3 decimals.
+- Scheme 12 stage II: Q_i_verh·Q_нужно/Q_verh, Q_нужно with the model flow through stage II.
 - Washers: S = (H_ras − ΣΔHшайб)/G², ΔH = H_new − S·G_цель², all washers in series count, the return
   washer is the lever when present; second round: ΔP after the CTP from two runs, the loss to each
   house ∝ G² («Давления второго контура» п. 3). Elevator: H_ras = ΔHшайбы + ΔHсопла.
