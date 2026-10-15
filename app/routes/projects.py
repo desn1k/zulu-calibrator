@@ -8,15 +8,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.engine.criteria import CARD_RESULT_FIELDS, CONSUMER_RESULT_FIELDS
+from app.engine.dhw import choose_dhw_target
 from app.engine.edits import ConsumerEdit, edited_cells
 from app.engine.grouping import group_consumers, group_key, load_of
 from app.engine.meters import BLOCK_KEYS, consumer_kind, meter_checks, meter_for
 from app.engine.model import CtpFact, DhwFact, HeatingFact, InletFact, Mode, VentFact
+from app.engine.sql import sql_text
 from app.engine.units import PressureUnit, pressure_to_m
 from app.models import Project
 from app.routes.pages import ru, templates
 from app.services import projects as svc
-from app.services.projects import STEP_TITLES, STEPS, StepError
+from app.services.projects import STEP_TITLES, StepError
 
 router = APIRouter()
 
@@ -83,7 +85,7 @@ def nav(project: Project) -> list[dict[str, Any]]:
             "open": svc.can_open(project, s),
             "current": s == project.current_step,
         }
-        for s in STEPS
+        for s in svc.steps_of(project)
     ]
 
 
@@ -239,12 +241,15 @@ def checks_context(project: Project, error: str = "") -> dict[str, Any]:
         )
 
     shares = svc.shares_of(project)
+    group_meters = svc.step_view(project)["group_meters"]
     groups = []
     for g in group_consumers(snap.consumers):
         if not g.multi_input:
             continue
         key = group_key(g)
-        loads = {c.sys: load_of(c, g.kind) for c in g.members}
+        # default split of one building meter: by model flow (Gso), else by load
+        flows = {c.sys: c.num("Gso") or 0.0 for c in g.members}
+        loads = flows if sum(flows.values()) > 0 else {c.sys: load_of(c, g.kind) for c in g.members}
         total = sum(loads.values()) or 1.0
         stored = shares.get(key)
         groups.append(
@@ -260,13 +265,27 @@ def checks_context(project: Project, error: str = "") -> dict[str, Any]:
                     for c in g.members
                 ],
                 "edited": stored is not None,
+                "by_flow": sum(flows.values()) > 0,
+                "guid": g.guid,
+                "metered": any(meter_for(c) for c in g.members),
+                "meter": group_meters.get(g.guid or "", {}),
             }
         )
 
+    dhw = choose_dhw_target(fact, snap.consumers, svc.CIRCULATION.get(
+        svc.step_view(project)["circulation"]
+    )) if fact.dhw else None  # fmt: skip
+    checks = meter_checks(fact, snap.consumers, snap.card)
+    if dhw is not None:
+        for c in checks:
+            if c.no == 7:
+                c.values["dhw_source"] = dhw.reason
+                c.message = (c.message + " " if c.message else "") + " ".join(dhw.notes)
     return {
         "project": project,
         "nav": nav(project),
-        "checks": meter_checks(fact, snap.consumers, snap.card),
+        "checks": checks,
+        "check_values": check_values,
         "consumers": consumers,
         "groups": groups,
         "blocks": BLOCKS,
@@ -352,6 +371,32 @@ async def checks_shares(
     return redirect(url_of(project, "checks"))
 
 
+@router.post("/projects/{pid}/checks/group-meters")
+async def checks_group_meters(
+    request: Request, pid: int, session: Session = Depends(get_session)
+) -> Response:
+    """Meter of a multi-input building (meter node before the building), entered by hand until
+    the network export (PR-5)."""
+    project = load(session, pid)
+    form = await request.form()
+    snap = svc.effective_snapshot(project)
+    stored: dict[str, Any] = {}
+    try:
+        for g in group_consumers(snap.consumers):
+            if not g.multi_input or not g.guid or g.kind != "heating":
+                continue
+            values = {k: to_float(form.get(f"gm:{g.guid}:{k}")) for k in ("G1", "Q", "T1", "T2")}
+            if values["G1"] is None:
+                continue
+            stored[g.guid] = values
+    except StepError as e:
+        return render(
+            request, "checks.html", status_code=e.status, **checks_context(project, str(e))
+        )
+    svc.update_settings(session, project, group_meters=stored)
+    return redirect(url_of(project, "checks"))
+
+
 @router.post("/projects/{pid}/checks/next")
 def checks_next(pid: int, session: Session = Depends(get_session)) -> RedirectResponse:
     project = load(session, pid)
@@ -367,6 +412,44 @@ def copy_text(rows) -> str:
     return "\n".join(f"{r.target}\t{r.field}\t{ru(r.enter)}" for r in rows)
 
 
+# Values of the meter checks: Russian label, unit, decimals (1 for %, t/h, °C, m; 3 for Gcal/h).
+VALUE_LABELS: dict[str, tuple[str, str, int]] = {
+    "Qso": ("Qсо", "Гкал/ч", 3), "Qgv": ("Qгв", "Гкал/ч", 3), "Thv": ("Tхв", "°C", 1),
+    "Q_inlet": ("Q ввода", "Гкал/ч", 3), "Q_expected": ("Qсо + Qгв", "Гкал/ч", 3),
+    "deviation_pct": ("отклонение", "%", 1), "ctp_leak": ("G3 − G4 ЦТП", "т/ч", 1),
+    "houses_leak": ("Σ(G1 − G2) домов", "т/ч", 1), "sum_heating_G1": ("Σ G1 отопления", "т/ч", 1),
+    "heating_deviation_pct": ("отопление", "%", 1), "sum_dhw_G1": ("Σ G1 ГВС", "т/ч", 1),
+    "dhw_supply_deviation_pct": ("подача ГВС", "%", 1), "sum_dhw_G2": ("Σ G2 ГВС", "т/ч", 1),
+    "dhw_circ_deviation_pct": ("циркуляция ГВС", "%", 1),
+    "sum_heating_Q": ("Σ Q отопления домов", "Гкал/ч", 3), "losses": ("потери", "Гкал/ч", 3),
+    "losses_pct": ("потери", "%", 1), "ctp_draw_off": ("разбор ЦТП", "т/ч", 1),
+    "houses_draw_off": ("разбор домов", "т/ч", 1), "two_stage": ("двухступенчатая", "", 0),
+    "T1": ("T1 ввода", "°C", 1), "t_source": ("t источника", "°C", 1),
+    "P1": ("P1 прибора", "м", 1), "Ppod": ("Ppod модели", "м", 1), "P2": ("P2 прибора", "м", 1),
+    "Pobr": ("Pobr модели", "м", 1), "supply_shift": ("сдвиг подачи", "м", 1),
+    "return_shift": ("сдвиг обратки", "м", 1), "flagged": ("Sys", "", 0),
+    "dhw_source": ("источник разбора", "", 0),
+}  # fmt: skip
+
+
+def check_values(values: dict[str, Any]) -> list[str]:
+    """Values of a meter check with Russian labels and units (no internal keys on the page)."""
+    out = []
+    for key, v in values.items():
+        label, unit, digits = VALUE_LABELS.get(key, (key, "", 3))
+        if v is None or v == []:
+            continue
+        if isinstance(v, bool):
+            out.append(f"{label}: {ru(v)}")
+        elif isinstance(v, int | float):
+            out.append(f"{label} = {ru(float(v), digits)}" + (f" {unit}" if unit else ""))
+        elif isinstance(v, list):
+            out.append(f"{label}: {', '.join(map(str, v))}")
+        else:
+            out.append(f"{label}: {v}")
+    return out
+
+
 def step_page(
     request: Request, project: Project, step: str, error: str = "", status_code: int = 200
 ):
@@ -376,6 +459,7 @@ def step_page(
         request, "step.html", status_code=status_code, project=project, nav=nav(project),
         step=step, title=STEP_TITLES[step], view=view, settings=svc.step_view(project),
         copy=copy_text(view.result.rows) if view.result else "",
+        sql_batch=sql_text(view.sql), sql_single=sql_text(view.sql, batch=False),
         is_current=step == project.current_step, state=states.get(step), error=error,
         iterations=project.iterations,
     )  # fmt: skip
@@ -419,11 +503,24 @@ async def step_settings(
     project = load(session, pid)
     form = await request.form()
     try:
-        if step == "1":
+        if "layer" in form:
+            layer = str(form.get("layer") or "").strip().strip("[]")
+            if not layer or any(ch in layer for ch in "[];'\""):
+                raise StepError("Имя слоя: без скобок, кавычек и «;».", 400)
+            svc.update_settings(session, project, layer=layer)
+        elif step == "1":
+            kgv_mode = str(form.get("kgv_mode") or "formula")
+            circulation = str(form.get("circulation") or "")
+            if kgv_mode not in ("formula", "model") or circulation not in ("", "yes", "no"):
+                raise StepError("Неизвестное значение настройки.", 400)
             svc.update_settings(
                 session, project,
                 t22_niz=to_float(form.get("t22_niz")), t12_verh=to_float(form.get("t12_verh")),
+                t_o=to_float(form.get("t_o")), kgv_mode=kgv_mode, circulation=circulation,
             )  # fmt: skip
+        elif step == "4" and "washers_first" in form:
+            svc.washers_first(session, project, form.get("washers_first") == "on")
+            return redirect(url_of(project))
         elif step == "4":
             svc.update_settings(session, project, kso_exception=bool(form.get("kso_exception")))
     except StepError as e:

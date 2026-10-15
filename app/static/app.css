@@ -7,6 +7,7 @@
   --ok-bg: #e8f5e9;
   --fail-bg: #fdecea;
   --warn-bg: #fff4e5;
+  --note-bg: #e8f1fb;
   --edited-bg: #fff3b0;
 }
 
@@ -49,7 +50,8 @@ th { background: #f6f8fa; }
 
 tr.pass td:last-child, tr.status-ok td:nth-child(3) { background: var(--ok-bg); }
 tr.fail td:last-child, tr.status-flag td:nth-child(3) { background: var(--fail-bg); }
-tr.status-question td:nth-child(3), tr.status-note td:nth-child(3) { background: var(--warn-bg); }
+tr.status-question td:nth-child(3) { background: var(--warn-bg); }
+tr.status-note td:nth-child(3) { background: var(--note-bg); }
 
 td.enter { font-weight: 600; }
 .tag { display: inline-block; padding: 0 6px; border-radius: 4px; background: var(--warn-bg); }
@@ -97,3 +99,16 @@ label.block { display: block; margin: 8px 0; }
 label.block textarea, label.block input[type=file] { display: block; margin-top: 4px; }
 textarea[data-card] { width: 100%; max-width: 48em; font-family: ui-monospace, monospace; }
 details.legacy-import { margin: 12px 0; }
+
+/* SQL for Zulu */
+pre.sql { background: var(--code-bg, #f4f4f4); padding: 8px 12px; overflow-x: auto; white-space: pre; font-size: 0.85em; }
+.sql-block { margin: 8px 0; }
+form.inline-form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+
+/* status legend of the meter checks */
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.9em; margin: 8px 0; }
+.legend span { padding: 2px 8px; border-radius: 4px; }
+.legend .ok { background: var(--ok-bg); }
+.legend .note { background: var(--note-bg); }
+.legend .question { background: var(--warn-bg); }
+.legend .flag { background: var(--fail-bg); }

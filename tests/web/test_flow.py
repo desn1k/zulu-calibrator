@@ -106,8 +106,8 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert "T2_bal" in text and "57,2" in text and "57" in text
     assert "T2 ввода физически не опустится до факта" in text
     assert "ЦТП\tT12_i_niz\t57,2" in text  # «Копировать» payload
-    assert "33553\tKgv\t0,36" in text
-    assert "33567\tKgv\t0,07" in text
+    assert "33553\tKgv\t0,361" in text
+    assert "33567\tKgv\t0,072" in text
     assert "по теплу (расход не измерен)" in text
 
     resp = advance(client, pid, "1")
@@ -165,8 +165,9 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert resp.headers["location"] == f"/projects/{pid}/summary"
 
     text = page(client, f"/projects/{pid}/summary")
-    assert "модель" in text and "факт" in text
+    assert "Модель" in text and "Факт" in text
     assert "Gsum_pod" in text
+    assert "<code>Gso:" not in text  # titles, not internal keys
 
     text = page(client, "/projects")
     assert "принят с отклонениями" in text

@@ -17,15 +17,14 @@
 
 <h2>Модель / факт по последней выгрузке</h2>
 <table class="criteria">
-  <thead><tr><th>Поле</th><th>Что</th><th>модель</th><th>факт</th><th>Откл.</th><th>Итог</th></tr></thead>
+  <thead><tr><th>Что</th><th>Модель</th><th>Факт</th><th>Откл.</th><th>Итог</th></tr></thead>
   <tbody>
     {% for c in rows %}
     <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
-      <td><code>{{ c.key }}</code></td>
-      <td>{{ c.title }}</td>
-      <td>{{ c.model|ru(3) }}</td>
-      <td>{{ c.fact|ru(3) }}</td>
-      <td>{% if c.deviation is not none %}{{ c.deviation|ru(2) }} {{ c.unit }}{% endif %}</td>
+      <td>{{ c.title }}{% if c.note %} <span class="tag">{{ c.note }}</span>{% endif %}</td>
+      <td>{{ c.model|ru(c.key|value_digits) }}</td>
+      <td>{{ c.fact|ru(c.key|value_digits) }}</td>
+      <td>{% if c.deviation is not none %}{{ c.deviation|ru(1) }} {{ c.unit }}{% endif %}</td>
       <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
     </tr>
     {% endfor %}

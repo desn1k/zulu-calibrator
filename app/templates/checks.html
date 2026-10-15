@@ -7,6 +7,13 @@
 <p class="muted">До любых правок приборы сводятся в баланс. Прибор, который противоречит балансу, помечается
   и не идёт в цель подгонки. Калькулятор ничего не правит сам.</p>
 
+<div class="legend" aria-label="Обозначения">
+  <span class="ok">в норме — прибор сходится с балансом</span>
+  <span class="note">пояснение — не ошибка, для сведения</span>
+  <span class="question">вопрос — решает пользователь</span>
+  <span class="flag">флажок — прибор противоречит балансу, в цель не идёт</span>
+</div>
+
 <table class="checks">
   <thead><tr><th>№</th><th>Проверка</th><th>Итог</th><th>Что сделать</th></tr></thead>
   <tbody>
@@ -14,9 +21,7 @@
     <tr class="status-{{ c.status.value }}">
       <td>{{ c.no }}</td>
       <td>{{ c.title }}
-        {% if c.values %}<div class="values">
-          {% for k, v in c.values.items() %}{% if v is number %}{{ k }} = {{ v|ru(3) }}{% if not loop.last %}; {% endif %}{% elif v is sameas true or v is sameas false %}{{ k }} = {{ v|ru }}{% if not loop.last %}; {% endif %}{% endif %}{% endfor %}
-        </div>{% endif %}
+        {% set shown = check_values(c.values) %}{% if shown %}<div class="values">{{ shown|join("; ") }}</div>{% endif %}
       </td>
       <td>{{ {"ok": "в норме", "note": "пояснение", "flag": "флажок", "question": "вопрос", "n/a": "нет данных"}[c.status.value] }}</td>
       <td>{{ c.message }}</td>
@@ -63,18 +68,19 @@
 {% if groups %}
 <h2>Многовводовые дома</h2>
 <p class="muted">Несколько объектов одного типа под одним GUID: в каждой строке один неделёный прибор на дом.
-  Прибор делится по нагрузке; доли можно поправить (сумма — 100 %).</p>
+  Прибор дома — один на весь дом; цель по расходу делится по расходу модели (Gso), доли можно поправить
+  (сумма — 100 %).</p>
 <form method="post" action="/projects/{{ project.id }}/checks/shares">
   {% for g in groups %}
   <fieldset>
     <legend>GUID {{ g.key.split(':')[0][:8] }} · {{ {"heating": "отопление", "dhw": "ГВС", "vent": "вентиляция"}[g.kind] }}</legend>
     <table>
-      <thead><tr><th>Sys</th><th>Нагрузка</th><th>Доля, %</th></tr></thead>
+      <thead><tr><th>Sys</th><th>{% if g.by_flow %}Gso модели, т/ч{% else %}Нагрузка{% endif %}</th><th>Доля, %</th></tr></thead>
       <tbody>
         {% for m in g.members %}
         <tr>
           <td>{{ m.sys }}</td>
-          <td>{{ m.load|ru(4) }}</td>
+          <td>{{ m.load|ru(3) }}</td>
           <td><input class="num{% if g.edited %} edited{% endif %}" name="share:{{ m.sys }}" value="{{ m.share|ru(1) }}" inputmode="decimal"></td>
         </tr>
         {% endfor %}
@@ -84,6 +90,30 @@
   {% endfor %}
   <button type="submit">Сохранить доли</button>
 </form>
+
+{% set unmetered = groups|selectattr("kind", "equalto", "heating")|rejectattr("metered")|list %}
+{% if unmetered %}
+<h2>Приборы многовводовых домов (узлы учёта)</h2>
+<p class="muted">Прибор нарисован узлом учёта перед домом, а в строках домов его нет. До выгрузки сети (следующая
+  версия) введите его вручную: G1 т/ч, Q Гкал/ч, T1 / T2 °C. Дом без прибора и без узла получает остаток ЦТП.</p>
+<form method="post" action="/projects/{{ project.id }}/checks/group-meters">
+  <table>
+    <thead><tr><th>GUID</th><th>Sys</th><th>G1</th><th>Q</th><th>T1</th><th>T2</th></tr></thead>
+    <tbody>
+      {% for g in unmetered %}
+      <tr>
+        <td class="muted">{{ g.guid[:8] }}</td>
+        <td>{{ g.members|map(attribute="sys")|join(", ") }}</td>
+        {% for k in ["G1", "Q", "T1", "T2"] %}
+        <td><input class="num" name="gm:{{ g.guid }}:{{ k }}" value="{{ g.meter.get(k)|ru }}" inputmode="decimal"></td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button type="submit">Сохранить приборы домов</button>
+</form>
+{% endif %}
 {% endif %}
 
 <form method="post" action="/projects/{{ project.id }}/checks/next" class="next">

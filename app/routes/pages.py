@@ -35,6 +35,14 @@ def ru(value: Any, digits: int | None = None) -> str:
 templates.env.filters["ru"] = ru
 
 
+def value_digits(key: str) -> int:
+    """Decimals of a criterion value: 3 for heat (Gcal/h), 1 for t/h, °C, m and %."""
+    return 3 if key.startswith("Q") else 1
+
+
+templates.env.filters["value_digits"] = value_digits
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "index.html")
