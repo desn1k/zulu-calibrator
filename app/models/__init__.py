@@ -78,3 +78,18 @@ class ConsumerEditRow(Base):
     block: Mapped[str | None] = mapped_column(String(4))
     overrides: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     distrust: Mapped[bool] = mapped_column(default=False)
+
+
+class SchemeStatus(Base):
+    """«Статус схем»: a scheme without a row is «не отлажена». «Откалибрована» is set by migration
+    0003 for the initial schemes and otherwise only by «подтвердить» on a finished project."""
+
+    __tablename__ = "scheme_status"
+    __table_args__ = (UniqueConstraint("kind", "n"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))  # "ctp" | "consumer"
+    n: Mapped[int]
+    status: Mapped[str] = mapped_column(String(20))  # "in_check" | "calibrated"
+    calibrated_on: Mapped[date | None] = mapped_column(Date)
+    project: Mapped[str] = mapped_column(String(200), default="")
