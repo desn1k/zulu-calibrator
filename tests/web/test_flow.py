@@ -148,7 +148,9 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert "нагрузка в модели ≠ договорной" in text
     assert advance(client, pid, "4").status_code == 409
     import_export(client, pid, "4", "it6_step4_kso")
-    resp = advance(client, pid, "4")
+    # ±4 % since 2026-10-15: 33525 and 33531 at −4.1 % → accepted with a comment
+    assert advance(client, pid, "4").status_code == 409
+    resp = accept(client, pid, "4", "33525 и 33531 −4,1 %, дотянет шаг 5")
     assert resp.headers["location"] == f"/projects/{pid}/steps/5"
 
     # Step 5 on it6 → it7

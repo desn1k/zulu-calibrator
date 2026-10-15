@@ -33,6 +33,42 @@ def by_abs(
     return Criterion(key, title, model, fact, dev, limit, "°C", abs(dev) <= limit + 1e-9)
 
 
+FIRST_CONTOUR_NOTE = "первый контур / прибор"
+
+
+def by_temp(
+    key: str,
+    title: str,
+    model: float | None,
+    fact: float | None,
+    supply_model: float | None,
+    supply_fact: float | None,
+) -> Criterion:
+    """«Допуск» for a return temperature: ±4 % of the value when the model supply is within 1 °C
+    of the meter; otherwise ±4 % on ΔT (supply − return), and the shift of the absolute T2 is
+    reported as «первый контур / прибор»."""
+    limit = config.TEMP_TOLERANCE_PCT
+    if model is None or not fact:
+        return Criterion(key, f"{title} ±{limit:g} %", model, fact, None, limit, "%", False)
+    if (
+        supply_model is None
+        or supply_fact is None
+        or abs(supply_model - supply_fact) <= config.TEMP_SUPPLY_MATCH_C
+    ):
+        c = by_pct(key, f"{title} ±{limit:g} %", model, fact, limit)
+        return c
+    dt_model, dt_fact = supply_model - model, supply_fact - fact
+    title = f"{title}: ΔT (подача − обратка) ±{limit:g} %"
+    if not dt_fact:
+        return Criterion(key, title, dt_model, dt_fact, None, limit, "%", False)
+    dev = (dt_model / dt_fact - 1.0) * 100.0
+    note = (
+        f"подача модели {supply_model:.1f} против прибора {supply_fact:.1f} °C, "
+        f"T2 {model - fact:+.1f} °C — {FIRST_CONTOUR_NOTE}"
+    )
+    return Criterion(key, title, dt_model, dt_fact, dev, limit, "%", abs(dev) <= limit + 1e-9, note)
+
+
 def criteria_step1(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
     inlet, heating = fact.inlet, fact.heating
     gverh = snap.card_num("Gverh")
@@ -53,8 +89,8 @@ def criteria_step1(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
                heating.G3 if heating else None, config.STEP1_SECOND_CIRCUIT_FLOW_PCT),
         by_pct("Gsum_pod", "G ввода ±2 %", snap.card_num("Gsum_pod"),
                inlet.G1 if inlet else None, config.INLET_FLOW_PCT),
-        by_pct("T2_t", "T2_t ввода ±4 %", snap.card_num("T2_t"),
-               inlet.T2 if inlet else None, config.STEP1_INLET_T2_PCT),
+        by_temp("T2_t", "T2_t ввода", snap.card_num("T2_t"), inlet.T2 if inlet else None,
+                snap.card_num("T1_t"), inlet.T1 if inlet else None),
     ]  # fmt: skip
 
 
@@ -102,15 +138,15 @@ def criteria_step3(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
 
 
 def house_heat(snap: Snapshot, shares: Shares | None = None) -> list[Criterion]:
-    """Q_sum of each heating house ±5 %; houses without a usable meter are left out."""
+    """Q_sum of each heating house ±4 %; houses without a usable meter are left out."""
     meters = house_meters(snap.consumers, shares)
     out = []
     for c in snap.consumers:
         m = meters.get(c.sys)
         if consumer_kind(c.scheme) != "heating" or m is None or m.Q is None:
             continue
-        out.append(by_pct(f"Q_sum:{c.sys}", f"Sys {c.sys}: Q_sum ±5 %", c.num("Q_sum"), m.Q,
-                          config.HOUSE_HEAT_PCT))  # fmt: skip
+        title = f"Sys {c.sys}: Q_sum ±{config.HOUSE_HEAT_PCT:g} %"
+        out.append(by_pct(f"Q_sum:{c.sys}", title, c.num("Q_sum"), m.Q, config.HOUSE_HEAT_PCT))
     return out
 
 
@@ -119,7 +155,7 @@ def criteria_step4(snap: Snapshot, shares: Shares | None = None) -> list[Criteri
 
 
 def criteria_step5(snap: Snapshot, fact: CtpFact, shares: Shares | None = None) -> list[Criterion]:
-    """Gso per house (multi-input: each input ±5 %, the group ±2 %), Gsum_pod2, heat of houses.
+    """Gso per house (multi-input: each input ±4 %, the group ±2 %), Gsum_pod2, heat of houses.
 
     Houses without a usable meter (none, or «не доверять») are left out.
     """
@@ -133,7 +169,8 @@ def criteria_step5(snap: Snapshot, fact: CtpFact, shares: Shares | None = None) 
                 continue
             for c in g.members:
                 fact_g = split[c.sys].G1 if c.sys in split else None
-                title = f"Sys {c.sys}: Gso ±5 % (ввод многовводового дома)"
+                limit = config.MULTI_INPUT_EACH_PCT
+                title = f"Sys {c.sys}: Gso ±{limit:g} % (ввод многовводового дома)"
                 out.append(by_pct(f"Gso:{c.sys}", title, c.num("Gso"), fact_g,
                                   config.MULTI_INPUT_EACH_PCT))  # fmt: skip
             total_model = sum(c.num("Gso") or 0.0 for c in g.members)

@@ -1,6 +1,7 @@
 """Step criteria evaluated on a fresh export, and the «identical exports» trap."""
 
 from app.engine.criteria import (
+    by_temp,
     criteria_step1,
     criteria_step2,
     criteria_step3,
@@ -24,7 +25,7 @@ def test_step1_criteria_on_it2(fact) -> None:
     assert s["T2so_t"] is False  # 61.45 vs 60.3 — outside ±0.7 °C
     assert s["Gsum_pod2"] is True  # −0.5 %
     assert s["Gsum_pod"] is True  # −1.2 %
-    assert s["T2_t"] is False  # +4.1 %, limit ±4 %
+    assert s["T2_t"] is False  # supply 87.8 vs 89.2 (> 1 °C) → by ΔT: 28.5 vs 32.2 = −11.6 %
 
 
 def test_step1_criteria_catch_unrecalculated_scheme(fact) -> None:
@@ -53,7 +54,8 @@ def test_step3_criteria_on_it3(fact) -> None:
 def test_step4_criteria_on_it6() -> None:
     crit = criteria_step4(imported("it6_step4_kso").snapshot)
     assert len(crit) == 8
-    assert all(c.passed for c in crit)
+    # ±4 % since 2026-10-15 (was ±5 %): two houses at −4.1 % are just outside.
+    assert {c.key for c in crit if not c.passed} == {"Q_sum:33525", "Q_sum:33531"}
 
 
 def test_step4_criteria_fail_before_kso() -> None:
@@ -75,7 +77,7 @@ def test_step5_multi_input_house_uses_group_and_per_input_limits(fact) -> None:
     from app.engine.model import Consumer, Snapshot
 
     meter = {"G1_OT": 20.0, "G2_OT": 19.6, "Q_OT": 0.4, "Q_sum": 0.2}
-    house = [  # split by Qo_r: 15 / 5 t/h; model 15.6 (+4 %) and 4.8 (−4 %): each within ±5 %
+    house = [  # split by Qo_r: 15 / 5 t/h; model 15.6 (+4 %) and 4.8 (−4 %): each within ±4 %
         Consumer(sys=1, guid="g", scheme=4, fields={"Qo_r": 0.3, "Gso": 15.6, **meter}),
         Consumer(sys=2, guid="g", scheme=4, fields={"Qo_r": 0.1, "Gso": 4.8, **meter}),
     ]
@@ -91,3 +93,17 @@ def test_identical_results_trap() -> None:
         imported("it3_step2").snapshot, imported("it5_step3_rollback").snapshot
     )
     assert not results_identical(imported("it2_step1a").snapshot, imported("it3_step2").snapshot)
+
+
+def test_return_temperature_by_value_when_supply_matches() -> None:
+    c = by_temp("T2", "T2", 60.0, 58.0, 89.0, 89.5)  # supply within 1 °C → ±4 % of 58
+    assert c.passed and round(c.deviation, 2) == 3.45 and not c.note
+    assert not by_temp("T2", "T2", 61.0, 58.0, 89.0, 89.5).passed  # +5.2 %
+
+
+def test_return_temperature_by_delta_t_when_supply_differs() -> None:
+    # README chernyshevskogo_8 final: heating return 54.95 vs 58.2 with supply 87.05 vs 89.2
+    c = by_temp("T2so_t", "T2 отопления", 54.95, 58.2, 87.05, 89.2)
+    assert c.passed  # ΔT 32.1 vs 31.0 = +3.5 %
+    assert round(c.model, 2) == 32.1 and round(c.fact, 1) == 31.0
+    assert "первый контур / прибор" in c.note

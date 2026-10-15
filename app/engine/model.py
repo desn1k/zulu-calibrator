@@ -153,3 +153,4 @@ class Criterion:
     limit: float
     unit: Literal["%", "°C", ""]
     passed: bool
+    note: str = ""  # e.g. «первый контур / прибор» when a temperature is judged by ΔT
