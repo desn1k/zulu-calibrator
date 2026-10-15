@@ -2,9 +2,16 @@
 
 import pytest
 
-from app.engine.step4 import KSO_EXCEPTION_NOTE, step4
+from app.engine.step4 import KSO_EXCEPTION_NOTE
+from app.engine.step4 import step4 as step4_engine
+from app.engine.targets import heating_targets
 
 from .conftest import by_target, imported
+
+
+def step4(snap, kso_exception: bool = False):
+    return step4_engine(snap, heating_targets(snap, None), kso_exception=kso_exception)
+
 
 KSO_GOLDEN = {
     "33523": 1.075,

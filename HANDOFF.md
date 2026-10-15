@@ -2,24 +2,83 @@
 
 ## 0. Current state
 
-- PR-1 (skeleton) and PR-2 (engine, `app/engine/`) merged.
-- PR-3 (local UI, no auth) is in review on branch `pr-3-local-ui`:
-  - DB (migration `0002`): `project` (CTP + measurement date, CTP fact, settings), `iteration`
-    (each imported export, attached to the open step), `step_state`, `consumer_edit` (by Sys).
-  - `app/services/projects.py` — state machine fact → checks → 1 … 5 → summary; recommendations and
-    criteria always from the latest export with manual edits applied; «принять с отклонением»
-    needs a comment.
-  - `app/routes/projects.py` + templates: home, history / resume, import (`static/import.js` strips
-    Name / Bld / Adres in the browser; the server strips again), CTP fact form (м вод. ст. or
-    кгс/см² ×10), meter checks 1–11 with per-Sys edits (block, value, «не доверять») and
-    multi-input shares, one page per step with «Копировать», summary, read-only iterations.
-  - Engine: `edits.py` (manual edits), `house_meters` (split meters of multi-input houses with
-    edited shares) used by steps 4–5 and criteria; «не доверять» meters are left out of the balance,
-    the recommendations and the criteria.
-  - Run locally: `scripts/run_local.ps1` / `scripts/run_local.sh` (`docs/LOCAL.md`), 127.0.0.1 only.
-- PR-2 CodeRabbit review had not arrived when PR-2 was merged: address it at the start of the next PR
-  (fix with a test, or reply with a reason on the PR-2 threads).
-- Next: PR-4 (auth by login), after PR-3 is merged.
+- PR-1 (skeleton), PR-2 (engine), PR-3 (local UI, no auth) merged. PR-2 got no review comments.
+  Run locally: `scripts/run_local.ps1` / `scripts/run_local.sh` (`docs/LOCAL.md`), 127.0.0.1 only.
+- PR-4 (CTP schemes 12, 3, 5, 6, elevators, real Zulu formats) is in review on branch
+  `pr-4-schemes-12-3-5-real-formats`:
+  - `docs/algorithm.md`: the 8 approved changes of 2026-10-15 + «Шероховатость по возрасту».
+  - Golden sets `chernyshevskogo_8`, `beregovaya_1_15`, `verkhnyaya_24`, `pionerskaya_2_30_36`
+    (`tests/fixtures/network_*` stay untracked — they belong to PR-5).
+  - `app/engine/parsers/`: one interface `parse_upload` for the Zulu CTP card paste
+    (`Field<TAB>value`, 2+ spaces, decimal comma) + consumer export (xlsx / csv, read in the browser
+    with vendored SheetJS 0.20.3 mini, sha256 `0cb353f8…0939`) and the old JSON export. Private
+    columns (Name, Bld, Adres, FIAS_Adress, FIAS_ID, UUTE_Name, any *adres* / *address* / *fias*)
+    are dropped in the browser and again on the server. Card meter blocks `_TS/_OT/_GVS/_SV` → CTP
+    fact.
+  - Engine: `schemes.py` (matrices, initial statuses), `dhw.py` (DHW target, sequential / parallel /
+    mixed-dependent test parameters, stage II tuning, Hgv2), `validity.py` (one building: CTP return
+    sensor; flow channel by load factor), `targets.py` (meter / group meter split by model flow /
+    remainder by Kso·Qo_r; Kso factors, unmetered k), `hydraulics.py` (washer ΔH, two H(G) points,
+    house head forecast), `inputs.py`, `run_warnings.py` (inlet washer plug, washer changed between
+    runs), `sql.py` (Zulu UPDATE batch / one by one, `Nshb = 0` fix).
+  - Steps: step 1 per scheme (Kgv automatic per object: alive → by model flow, else 1.3; an unmetered DHW object
+    gets the CTP meter rest), step 2 (skipped without circulation; Gcirc check + Tcirc from two
+    runs), step 4 (one Kso per building, unmetered k, cross-check, «сначала шаг 5»), step 5 (targets
+    for every input, two H(G) points for a second round, series washers, return washer as the lever,
+    elevators, forecast head below 4 m).
+  - Tolerances: hard ±4 % / step target ±2 % warning (`criteria.by_tol`), temperature rule
+    (`criteria.by_temp`); step order 5 before 4 per project.
+  - Scheme registry table `scheme_status` (migration 0003) seeded as calibrated: CTP 2, 3, 5, 6, 12,
+    consumers 2, 4, 26; the step page warns about uncalibrated schemes. The registry page and
+    «подтвердить» are still to do (PR-9).
+  - UI: SQL block with «по одной» and «Скопировать SQL», layer setting, Russian labels and units on
+    the checks, status legend, DHW source on check 7, group meters entered by hand (until PR-5).
+- Next: PR-5 — network after the CTP (export format to be confirmed by Andrew) + pressures of the
+  second contour (section «Давления второго контура», task 3c of PROMPT_PR-5) + the roughness band
+  check (bands go to `config.py` together with the check).
+
+### Andrew's decisions on PR-4 (2026-10-15) and what is still open
+
+Decided and applied:
+
+- Kgv per DHW object, automatically: «DHW alive» = Ggv > 0 and Tgv_t ≥ (T1_GVS of the meter, or
+  Tgv) − 10 °C → Kgv·G_цель/Ggv; not alive → formula 1.3. The branch is shown on each row; the step 1
+  setting can force either formula. Чернышевского / Верхняя → alive, Пионерская / Береговая → not.
+- Kgv threshold 4 % (algorithm 1.3 updated), 3 decimals.
+- Stage II (scheme 12): Q_нужно with the MODEL flow through stage II (G2_verh) → 0.385 from it6.
+- Network loss in the unmetered factor = Qut_pod + Qut_obr + Qut_potr of the card of the same run
+  (closes «источник потерь уточнить»): Верхняя 0.013, Чернышевского 0.029 → k 1.0963 / 1.0159 vs
+  README 1.0997 / 1.0194, within the Kso tolerance.
+- Пионерская a8 first Kso 0.925 — a session estimate, not asserted.
+- Every flow / heat / pressure-drop criterion: hard ±4 % (blocks), step target ±2 % (warning, not a
+  block); algorithm step criteria updated (steps 1, 3, 4, 5 and the multi-input group).
+- DHW outlet temperature within 1 °C; step 5 with CTP pumps waits for the inlet within ±4 %.
+- Огородная step 4 passing with a comment at −4.1 %; ruff skips `tests/fixtures`.
+
+Decided after review (2026-10-15):
+
+- Огородная golden tests keep the manual «формула 1.3» override; the automatic rule stays the default
+  (−6.4 / −4.8 / +3.6 % on 33553 / 33559 / 33561, refined by the next run).
+- If the same SQL batch changes the CTP Tgv, Kgv_new (model branch) × (Tgv_new − Thv)/(Tgv_old − Thv);
+  the factor is shown on the row (Верхняя: × 1.0491).
+- Stage II from it5: the rule gives 0.337 (the session entered 0.31 and needed a second pass) — no
+  assert.
+- Пионерская a8 fine-tune: the engine uses the card loss (0.9675); 0.976 (README remainder 0.42) is a
+  reference, −0.9 %, within the hard ±4 %.
+
+Still open (for Andrew):
+
+1. Thresholds kept outside the ±4 / ±2 pattern (they would break their own fixtures):
+   `DHW_HOUSES_AGREE_PCT` 10 % (Чернышевского buildings −8.8 % from the CTP balance),
+   `CHANNEL_FACTOR_MAX_DIFF_PCT` 25 % (Верхняя valid channel +4.1 %, rejected ×0.07 vs ×1.22),
+   `STEP2_TCIRC_ONLY_COOLING_SHARE` 0.5 (not a deviation; Береговая 12.8 of 15.0 °C → Tcirc only,
+   Огородная 1.7 of 12 °C → step 2). Step 2 «Gcirc ±10 %» left as in the algorithm.
+2. A multi-input building with one meter: the flow target is split by model flow (task); the GUID
+   section of the algorithm still says Qo_r (user shares override). One Kso per building.
+3. Regul_T = 1 is not recommended for scheme 12 (the session kept 0).
+4. Hsec_niz 0.4 (Чернышевского run 1): no rule found, not recommended.
+5. Known Regul_G / Regul_T labels: «Без регулятора», «Регулятор температуры»; any other label stops
+   the import with a message.
 
 ## Rule before any public deployment
 
@@ -39,27 +98,36 @@
      re-import of fresh data per iteration, «принять с отклонением» with a mandatory comment;
    - history and resume. Run with `uvicorn` on localhost.
    - manual consumer fact edits by Sys (block, value, «не доверять»), GUID groups with editable
-     shares, «Копировать» on each step's table. — in review.
-4. PR-4 Auth by login (no email field anywhere): admin/user roles, admin creates users with
+     shares, «Копировать» on each step's table. — merged.
+4. PR-4 CTP schemes 12, 3, 5, 6 and elevators (consumer scheme 2), real Zulu formats (CTP card
+   paste, consumer xlsx / csv — replaces the old «PR-8 parser»), method change 2026-10-15, SQL
+   output, initial scheme statuses, UI fixes. — in review.
+5. PR-5 Network after the CTP (after Andrew confirms the export format): pipes, nodes, valves with
+   geometry; tree from the CTP to every input; checks (roughness / overgrowth outside the band,
+   closed valves, diameter jumps, inputs not connected); per-path head losses into the washer head
+   forecast; meter nodes of multi-input buildings from the export (replaces the hand entry);
+   pressures of the second contour (losses CTP → each meter, CTP washer by the run result, return
+   washers after each pressure change).
+6. PR-6 Auth by login (no email field anywhere): admin/user roles, admin creates users with
    login + display name and a one-time generated password, forced password change, TOTP + backup
    codes, throttling, sessions, CSRF, secure headers.
-5. PR-5 Deploy: first release candidate on the VPS per `docs/DEPLOY.md` (only after PR-4).
-6. PR-6 AI review button via the backend: provider-agnostic client, GigaChat (primary) and OpenAI
+7. PR-7 Deploy: first release candidate on the VPS per `docs/DEPLOY.md` (only after PR-6).
+8. PR-8 AI review button via the backend: provider-agnostic client, GigaChat (primary) and OpenAI
    (secondary); per-provider `.env` settings (`GIGACHAT_API_KEY`, `GIGACHAT_MODEL`, `GIGACHAT_SCOPE`,
    `GIGACHAT_PROXY_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_PROXY_URL`, `AI_DEFAULT_PROVIDER`);
    each provider only through its own HTTP CONNECT proxy, never applied to other traffic; GigaChat OAuth
    via `ngw.devices.sberbank.ru:9443` and the Russian Ministry of Digital Development root CA in the
    image; admin switches the active provider; monthly limit and cost counter per provider (RUB / USD);
    `docs/DEPLOY.md` section on the NetBird + tinyproxy route for GigaChat.
-7. PR-7 Reset-to-base, step 0 checklist, scheme registry page and statuses, the full scheme matrices
-   (CTP 1–41, consumers 1–49) marked «first check».
-8. PR-8 Real Zulu paste parser (CTP card and consumer query) behind the parser interface, once
-   Andrew provides samples.
+9. PR-9 Reset-to-base, step 0 checklist, scheme registry page with «подтвердить», the full scheme
+   matrices (CTP 1–41, consumers 1–49) marked «first check».
 
 ### Backlog
 
 - Kgv target «верим ЦТП» (check 7 answer «ЦТП»): not specified in algorithm.md yet; engine raises
-  `NotImplementedError` for `draw_off_source="ctp"`.
+  `NotImplementedError` for `draw_off_source="ctp"`. Since 2026-10-15 the DHW target picks the
+  building sum automatically when the CTP DHW meter contradicts the CTP balance.
+- Step 6 (Kpoprav) and the second-day check.
 
 ## Decisions log
 
@@ -91,3 +159,26 @@
 - Step 4 default is variant А (no changes, heat deficit reported); Kso only with the «исключение Kso» flag.
 - Units: all pressures (meters and Zulu fields) are м вод. ст.; no conversion. The CTP fact form has a
   unit setting (м вод. ст. default, кгс/см² ×10 as an option).
+- 2026-10-15 priority change: CTP schemes 12, 3, 5, 6 and the real Zulu formats before auth (PR-4),
+  then the network export (PR-5). Auth must still be merged before any public deployment.
+- Method change 2026-10-15 applied to `docs/algorithm.md` (8 changes + «Шероховатость по возрасту»).
+- Zulu input: the CTP card is pasted as text, consumers come as an xlsx / csv export; the browser
+  reads xlsx with SheetJS (vendored, pinned) so private columns never leave the browser. Real exports
+  name the model heat `Qsum` (the old export `Q_sum`); the engine reads both.
+- Tolerances: hard ±4 % on flows, heat, pressure drops (house heat, each input and the whole of a
+  multi-input building, Gsum_pod2, G ввода), step target ±2 % as a warning; restored CTP block ±7 %
+  (estimate). Temperatures: ±4 % of the value when the model supply is within
+  1 °C of the meter, otherwise ±4 % on ΔT with the note «первый контур / прибор». Step 1
+  «T3so_t / T2so_t ±0,7 °C» kept (independent heating only).
+- Kso: one Kso per building (a multi-input building with one meter); unmetered buildings one factor
+  k = (Q_heating − Σ Q_metered − loss) / Σ Q_model, loss = Qut_pod + Qut_obr + Qut_potr of the card
+  of the same run.
+- Kgv: automatic per DHW object (alive → Kgv·G/Ggv, not alive → 1.3), threshold 4 %, 3 decimals.
+- Scheme 12 stage II: Q_i_verh·Q_нужно/Q_verh, Q_нужно with the model flow through stage II.
+- Washers: S = (H_ras − ΣΔHшайб)/G², ΔH = H_new − S·G_цель², all washers in series count, the return
+  washer is the lever when present; second round: ΔP after the CTP from two runs, the loss to each
+  house ∝ G² («Давления второго контура» п. 3). Elevator: H_ras = ΔHшайбы + ΔHсопла.
+- SQL: batch with «;» after every line except the last (default), «по одной» without «;»; the layer is
+  a project setting (default `Актуальный_расчетный_2025`).
+- Fixture CSV line endings are normalised to LF by `.gitattributes` (content unchanged); ruff does not
+  lint `tests/fixtures`.

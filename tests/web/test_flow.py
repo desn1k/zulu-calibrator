@@ -99,15 +99,17 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert resp.headers["location"] == f"/projects/{pid}/steps/1"
 
     # Step 1 on it0, with the free parameters of the real session (README: 59 / 57.5)
-    client.post(f"/projects/{pid}/steps/1/settings", data={"t22_niz": "59", "t12_verh": "57,5"})
+    # Kgv: the Огородная session used formula 1.3 (manual override of the automatic rule)
+    client.post(f"/projects/{pid}/steps/1/settings",
+                data={"t22_niz": "59", "t12_verh": "57,5", "kgv_mode": "formula"})  # fmt: skip
     text = page(client, f"/projects/{pid}/steps/1")
     for value in ("57,2", "60,9", "61,1", "0,362", "0,178", "92,8"):
         assert value in text
     assert "T2_bal" in text and "57,2" in text and "57" in text
     assert "T2 ввода физически не опустится до факта" in text
     assert "ЦТП\tT12_i_niz\t57,2" in text  # «Копировать» payload
-    assert "33553\tKgv\t0,36" in text
-    assert "33567\tKgv\t0,07" in text
+    assert "33553\tKgv\t0,361" in text
+    assert "33567\tKgv\t0,072" in text
     assert "по теплу (расход не измерен)" in text
 
     resp = advance(client, pid, "1")
@@ -148,7 +150,9 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert "нагрузка в модели ≠ договорной" in text
     assert advance(client, pid, "4").status_code == 409
     import_export(client, pid, "4", "it6_step4_kso")
-    resp = advance(client, pid, "4")
+    # ±4 % since 2026-10-15: 33525 and 33531 at −4.1 % → accepted with a comment
+    assert advance(client, pid, "4").status_code == 409
+    resp = accept(client, pid, "4", "33525 и 33531 −4,1 %, дотянет шаг 5")
     assert resp.headers["location"] == f"/projects/{pid}/steps/5"
 
     # Step 5 on it6 → it7
@@ -163,8 +167,9 @@ def test_full_walkthrough_on_ogorodnaya(client: TestClient) -> None:
     assert resp.headers["location"] == f"/projects/{pid}/summary"
 
     text = page(client, f"/projects/{pid}/summary")
-    assert "модель" in text and "факт" in text
+    assert "Модель" in text and "Факт" in text
     assert "Gsum_pod" in text
+    assert "<code>Gso:" not in text  # titles, not internal keys
 
     text = page(client, "/projects")
     assert "принят с отклонениями" in text

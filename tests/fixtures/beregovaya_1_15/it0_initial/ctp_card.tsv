@@ -1,0 +1,230 @@
+Name	ЦТП Береговая, 1/15
+Owner	КУИ
+Sp_upr	Концессия
+Division	2 ЭУ (2-й РТС)
+Schem_doc	ЦТП_Береговая_1-15.pdf
+Nist	1
+Sist	1
+H_geo	27.3
+N_schem	3
+T1_r	114
+T1to_so	75
+T2_r	70
+T3_r	95
+Hnz_ras	25.2
+Hnz_obr	76.3
+Podpit	
+Nsec_so	1
+Hsec_so	0.1
+Ngr_so	1
+Nel_r	0
+Dsop_r	0
+U_calc	0
+U_fakt	0
+Nel_u	
+Dsop_u	
+dHsoplo	
+T1_t	86.12
+T2_t	60.89
+T11_t	86.1
+T12_t	61.1
+G1_t	16.3986
+G2_t	36.7921
+T3so_t	68.69
+T2so_t	57.56
+Dshb_pod	19.21
+Nshb_pod	1
+Dshb_obr	0
+Nshb_obr	0
+Dshb_pod_u	24.6
+Nshb_pod_u	1
+Dshb_obr_u	
+Nshb_obr_u	0
+dHshb_pod	7.3
+dHshb_obr	
+Dshb_gvs	0
+Nshb_gvs	0
+Dshb_gvs_u	
+Nshb_gvs_u	0
+dHshb_gvs	
+Thv	5
+Tgv	61.3
+Hgv2_ras	1.8
+Hgv2_obr	84.8
+Thv_t	5
+Nsec_niz	1
+Ngr_niz	1
+Hsec_niz	0.1
+T11_i_niz	40
+T12_i_niz	35
+T21_i_niz	5
+T22_i_niz	35
+Q_i_niz	0.001
+Gniz	1.7209
+G2_niz	5.415
+Q_niz	0.0476
+T11_niz	86.1
+T12_niz	58.4
+T21_niz	14.6
+T22_niz	23.4
+Nsec_verh	1
+Ngr_verh	1
+Hsec_verh	0.1
+T11_i_verh	70
+T12_i_verh	40
+T21_i_verh	35
+T22_i_verh	60
+Q_i_verh	0.5
+T11_verh	
+T12_verh	
+T21_verh	0
+T22_verh	
+Gverh	0
+G2_verh	
+Q_verh	
+Gset_nal	14.813
+Qo_t	0.4054
+Qsv_t	0
+Qgv_t	0.0432
+Gsum_pod	18.1198
+Gt_obr	18.0792
+H_ras	7.4
+H_pod	94.08
+H_obr	86.68
+Ppod	66.78
+Pobr	59.38
+Hout_pod	101.5
+Hgv_pod	86.6
+Hgv_obr	84.8
+Pout_pod	74.2
+Pgv_pod	59.3
+Pgv_obr	57.5
+RegulVal	
+Kreg	
+Pout_obr	49
+Hout_obr	76.3
+Gperem	0
+Tvso_r	18
+Qgv_sred	1
+Regul_T	1
+Regul_T_kvs	
+Kb	1
+Regul_G	
+Hzapas	
+RegulType	
+Regul_G_kvs	
+Tcut	
+Tshelf	
+TGraph	
+Tnv_r	-23
+Tnv_t	-12.8
+Tsg_pod	67
+Tsg_obr	49
+Tsg_grunt	8.8
+Tsg_nv	5.3
+Tsg_podval	8.8
+Tsg_tunnel	
+Tgrunt	8.8
+Tpodval	8.8
+Ttunnel	
+Pcalibr_pod	
+Pcalibr_obr	
+Gcalibr_pod	
+Gcalibr_obr	
+Tcalibr_pod	
+Tcalibr_obr	
+Gsum_pod2	36.7921
+Qverh	
+Qniz	
+Qut_pod	0.0001
+Qut_obr	0.0001
+Qut_potr	0.0022
+T11_i	86.8
+T12_i	59.4
+T21_i	53.3
+T22_i	68.4
+G1_i	
+G2_i	38.1
+Qsum	0.4572
+Qts_pod	3108.0648
+Qts_obr	2496.2507
+Gut_pod	0.0009
+Gut_obr	0.0011
+Gut_potr	0.0382
+Time	102.51
+Dist	3443.2
+Tb	-3.83
+Tb_out	-6.99
+Hstat	79.12
+Hstat_out	58.51
+Qgv_sum	0.4534465536
+TEPL_PUNKT	
+TEPL_PUNKT_MASTER	
+OTOP	
+GVS	
+VENT	
+HVS	
+TS	
+ID_TIKU_OBJ	1f96bcdc-2dcf-4d9a-b062-da89cfd623bc
+ID_TIKU_TS	6b2f972e-4e7c-426d-9252-0bb7036ca352
+ID_TIKU_OTOP	be0a8b27-be29-412b-a821-b09a44a33295
+ID_TIKU_OTOP_1	0
+ID_TIKU_OTOP_2	0
+ID_TIKU_OTOP_3	0
+ID_TIKU_OTOP_4	0
+ID_TIKU_GVS	97d2a688-56c7-4901-b569-c3974e41f169
+ID_TIKU_GVS_1	0
+ID_TIKU_GVS_2	0
+ID_TIKU_GVS_3	0
+ID_TIKU_GVS_4	0
+ID_TIKU_VENT	0
+ID_TIKU_VENT_1	0
+ID_TIKU_VENT_2	0
+ID_TIKU_VENT_3	0
+ID_TIKU_VENT_4	0
+ID_TIKU_HVS	35f0c1d2-e6df-4448-ab52-a84fc684be0e
+ID_TIKU_HVS_1	0
+ID_TIKU_HVS_2	0
+ID_TIKU_HVS_3	0
+ID_TIKU_HVS_4	0
+ID_TIKU_TS_1	0
+ID_TIKU_TS_2	0
+ID_TIKU_TS_3	0
+ID_TIKU_TS_4	0
+TECH_POINT	ДА
+Dispetcher_spisok	
+Certification	
+DateMea	10.02.2026
+Tnv	-12.8
+T1_TS	86.8
+T2_TS	59.4
+P1_TS	80.1
+P2_TS	72.5
+dP_TS	7.7
+G1_TS	19.1
+G2_TS	19
+Q_TS	0.538
+T1_SV	
+T2_SV	
+P1_SV	
+P2_SV	
+dP_SV	
+G1_SV	
+G2_SV	
+Q_SV	
+T1_OT	68.4
+T2_OT	53.3
+P1_OT	74.2
+P2_OT	49
+dP_OT	25.2
+G1_OT	38.1
+G2_OT	38
+Q_OT	0.586
+T1_GVS	61.3
+T2_GVS	45.3
+P1_GVS	86.8
+P2_GVS	85
+dP_GVS	1.8
+G1_GVS	3.3
+G2_GVS	2.1
+Q_GVS	0.1

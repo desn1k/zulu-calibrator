@@ -112,9 +112,9 @@ def test_guid_groups_and_shares_are_shown_and_editable(client: TestClient) -> No
     enter_fact(client, pid)
     text = page(client, f"/projects/{pid}/checks")
     assert "Многовводовые дома" in text
-    # default split by Qo_r: 0.691158 / 1.496739 = 46.2 %, 53.8 %
-    assert 'value="46,2"' in cell(text, "share:33531")
-    assert 'value="53,8"' in cell(text, "share:33535")
+    # default split of one building meter: by model flow Gso 15.696 / 18.041 (2026-10-15)
+    assert 'value="46,5"' in cell(text, "share:33531")
+    assert 'value="53,5"' in cell(text, "share:33535")
 
     resp = client.post(
         f"/projects/{pid}/checks/shares",

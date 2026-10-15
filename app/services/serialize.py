@@ -4,7 +4,16 @@ import dataclasses
 from datetime import date
 from typing import Any
 
-from app.engine.model import Consumer, CtpFact, DhwFact, HeatingFact, InletFact, Mode, Snapshot
+from app.engine.model import (
+    Consumer,
+    CtpFact,
+    DhwFact,
+    HeatingFact,
+    InletFact,
+    Mode,
+    Snapshot,
+    VentFact,
+)
 from app.engine.units import PressureUnit
 
 
@@ -18,6 +27,7 @@ def snapshot_to_dict(snap: Snapshot) -> dict[str, Any]:
         ],
         "measured_on": snap.measured_on.isoformat() if snap.measured_on else None,
         "tnv": snap.tnv,
+        "warnings": list(snap.warnings),
     }
 
 
@@ -28,6 +38,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> Snapshot:
         consumers=[Consumer(**c) for c in d["consumers"]],
         measured_on=date.fromisoformat(d["measured_on"]) if d.get("measured_on") else None,
         tnv=d.get("tnv"),
+        warnings=list(d.get("warnings") or []),
     )
 
 
@@ -47,4 +58,5 @@ def fact_from_dict(d: dict[str, Any] | None) -> CtpFact:
         heating=HeatingFact(**d["heating"]) if d.get("heating") else None,
         dhw=DhwFact(**d["dhw"]) if d.get("dhw") else None,
         mode=Mode(**mode),
+        vent=VentFact(**d["vent"]) if d.get("vent") else None,
     )

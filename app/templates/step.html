@@ -2,6 +2,7 @@
 
 {% block title %}{{ title }} — {{ project.ctp_name }}{% endblock %}
 {% block head %}
+<script src="/static/xlsx-0.20.3.mini.min.js" defer></script>
 <script src="/static/import.js" defer></script>
 <script src="/static/copy.js" defer></script>
 {% endblock %}
@@ -17,6 +18,7 @@
 {% if view.identical %}
 <p class="warning">Результаты свежей выгрузки идентичны предыдущей — правка не внесена или поверочный расчёт не запущен.</p>
 {% endif %}
+{% for w in view.warnings %}<p class="warning">{{ w }}</p>{% endfor %}
 {% if view.iteration %}
 <p class="muted">Расчёт по выгрузке №{{ view.iteration.number }} ({{ view.iteration.created_at.strftime("%d.%m.%Y %H:%M") if view.iteration.created_at else "" }}).</p>
 {% endif %}
@@ -24,9 +26,24 @@
 {% if is_current and step == "1" %}
 <form method="post" action="/projects/{{ project.id }}/steps/1/settings" class="settings">
   <fieldset>
-    <legend>Свободные параметры (схема 2)</legend>
+    <legend>Свободные параметры и решения пользователя</legend>
     <label>T22_niz <input name="t22_niz" value="{{ settings.t22_niz|ru }}" placeholder="по умолчанию" inputmode="decimal"></label>
     <label>T12_verh <input name="t12_verh" value="{{ settings.t12_verh|ru }}" placeholder="по умолчанию" inputmode="decimal"></label>
+    <label>Tо (параллельная ГВС) <input name="t_o" value="{{ settings.t_o|ru }}" placeholder="подбор" inputmode="decimal"></label>
+    <label>Циркуляция от ЦТП
+      <select name="circulation">
+        <option value="" {% if not settings.circulation %}selected{% endif %}>по прибору ГВС ЦТП</option>
+        <option value="yes" {% if settings.circulation == "yes" %}selected{% endif %}>есть</option>
+        <option value="no" {% if settings.circulation == "no" %}selected{% endif %}>нет (Kcirc = 0, шаг 2 пропускается)</option>
+      </select>
+    </label>
+    <label>Kgv
+      <select name="kgv_mode">
+        <option value="auto" {% if settings.kgv_mode == "auto" %}selected{% endif %}>автоматически по каждому объекту</option>
+        <option value="formula" {% if settings.kgv_mode == "formula" %}selected{% endif %}>всегда формула 1.3 (по Tgv объекта)</option>
+        <option value="model" {% if settings.kgv_mode == "model" %}selected{% endif %}>всегда по расходу модели: Kgv·(G1 − G2)ф / Ggv</option>
+      </select>
+    </label>
     <button type="submit">Пересчитать</button>
   </fieldset>
 </form>
@@ -35,6 +52,9 @@
 <p class="t2">T2_bal (T2 ввода, сведённая в баланс) = <strong>{{ view.result.t2_balanced|ru(1) }}</strong> °C ·
   T2 прибора = {{ view.result.t2_meter|ru }} °C</p>
 {% endif %}
+{% if step == "1" and view.result and view.result.shown %}
+<p class="t2">{% for k, v in view.result.shown.items() %}{{ k }} = <strong>{{ v|ru(3 if k.startswith("Q") else 1) }}</strong>{{ " т/ч" if k.startswith("G") else (" Гкал/ч" if k.startswith("Q") else " °C") }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+{% endif %}
 
 {% if is_current and step == "4" %}
 <form method="post" action="/projects/{{ project.id }}/steps/4/settings" class="settings">
@@ -42,6 +62,12 @@
     исключение Kso (вариант Б: нагрузка в модели ≠ договорной)</label>
   <button type="submit">Применить</button>
 </form>
+{% if view.result and view.result.washers_first and not settings.washers_first %}
+<form method="post" action="/projects/{{ project.id }}/steps/4/settings" class="settings">
+  <input type="hidden" name="washers_first" value="on">
+  <button type="submit">Сначала шаг 5 (шайбы), потом шаг 4</button>
+</form>
+{% endif %}
 {% endif %}
 
 {% if view.result %}
@@ -66,6 +92,25 @@
   <span class="muted small">Sys / поле / значение через табуляцию</span>
 </p>
 <textarea id="copy-{{ step }}" class="copy-src" readonly hidden>{{ copy }}</textarea>
+
+<h3>SQL для Zulu</h3>
+<p class="muted small">Слой <code>[{{ settings.layer }}]</code>. Пакетом: «;» после каждой команды, кроме последней — Zulu
+  выполняет блок целиком. «По одной» — те же строки без «;», запускать по одной.</p>
+<div class="sql-block" data-sql>
+  <label class="inline"><input type="checkbox" data-sql-toggle> по одной</label>
+  <pre class="sql" data-sql-batch>{{ sql_batch }}</pre>
+  <pre class="sql" data-sql-single hidden>{{ sql_single }}</pre>
+  <textarea id="sql-batch-{{ step }}" class="copy-src" readonly hidden>{{ sql_batch }}</textarea>
+  <textarea id="sql-single-{{ step }}" class="copy-src" readonly hidden>{{ sql_single }}</textarea>
+  <button type="button" data-copy-target="sql-batch-{{ step }}" data-sql-copy
+    data-batch="sql-batch-{{ step }}" data-single="sql-single-{{ step }}">Скопировать SQL</button>
+</div>
+{% if is_current %}
+<form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/settings" class="settings inline-form">
+  <label>Слой Zulu <input name="layer" value="{{ settings.layer }}"></label>
+  <button type="submit" class="secondary">Сохранить слой</button>
+</form>
+{% endif %}
 {% else %}
 <p>Ничего вводить не нужно.</p>
 {% endif %}
@@ -86,27 +131,32 @@
 {% if step == "4" and view.result.heat_report %}
 <h3>Тепло домов: модель / факт</h3>
 <table>
-  <thead><tr><th>Sys</th><th>Q_sum модели</th><th>Q прибора</th><th>Откл., %</th></tr></thead>
+  <thead><tr><th>Дом (Sys)</th><th>Q модели, Гкал/ч</th><th>Q факт, Гкал/ч</th><th>Откл., %</th></tr></thead>
   <tbody>{% for h in view.result.heat_report %}
-    <tr><td>{{ h.target }}</td><td>{{ h.model|ru }}</td><td>{{ h.fact|ru }}{% if h.from_inlet %} (ввод){% endif %}</td><td>{{ h.deviation_pct|ru(1) }}</td></tr>
+    <tr><td>{{ h.target }}</td><td>{{ h.model|ru(3) }}</td><td>{{ h.fact|ru(3) }}{% if h.from_inlet %} (ввод){% endif %}</td><td>{{ h.deviation_pct|ru(1) }}</td></tr>
   {% endfor %}</tbody>
 </table>
 {% endif %}
 {% endif %}
 
 <h2>Критерии шага</h2>
+<p class="muted small">Расходы, тепло, перепады давления: допуск ±4 % (иначе шаг не сходится), цель шага ±2 % —
+  только предупреждение.</p>
+{% if view.criteria|selectattr("off_target")|list %}
+<p class="warning">В допуске ±4 %, но вне цели шага ±2 %: {{ view.criteria|selectattr("off_target")|map(attribute="title")|join("; ") }}. Можно идти дальше.</p>
+{% endif %}
 {% if view.criteria %}
 <table class="criteria">
   <thead><tr><th>Критерий</th><th>Модель</th><th>Факт</th><th>Откл.</th><th>Допуск</th><th>Итог</th></tr></thead>
   <tbody>
     {% for c in view.criteria %}
-    <tr class="{% if c.passed %}pass{% else %}fail{% endif %}">
-      <td>{{ c.title }} <span class="muted small">{{ c.key }}</span></td>
-      <td>{{ c.model|ru(3) }}</td>
-      <td>{{ c.fact|ru(3) }}</td>
-      <td>{% if c.deviation is not none %}{{ c.deviation|ru(2) }} {{ c.unit }}{% endif %}</td>
+    <tr class="{% if c.off_target %}warn{% elif c.passed %}pass{% else %}fail{% endif %}">
+      <td>{{ c.title }}{% if c.note %} <span class="tag">{{ c.note }}</span>{% endif %}</td>
+      <td>{{ c.model|ru(c.key|value_digits) }}</td>
+      <td>{{ c.fact|ru(c.key|value_digits) }}</td>
+      <td>{% if c.deviation is not none %}{{ c.deviation|ru(1) }} {{ c.unit }}{% endif %}</td>
       <td>{% if c.limit %}±{{ c.limit|ru }} {{ c.unit }}{% endif %}</td>
-      <td>{% if c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
+      <td>{% if c.off_target %}сошлось, вне цели ±{{ c.target|ru }} %{% elif c.passed %}сошлось{% else %}не сошлось{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -118,11 +168,17 @@
 {% if is_current %}
 <h2>Поверочный расчёт</h2>
 <p class="muted">Внесите значения в Zulu, сделайте поверочный расчёт и загрузите свежую выгрузку.</p>
-<form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/import" class="import-form">
-  <input type="file" accept=".json,application/json" data-import-file required>
-  <textarea name="payload" hidden></textarea>
-  <button type="submit">Загрузить свежую выгрузку</button>
-</form>
+{% with zulu_action="/projects/" ~ project.id ~ "/steps/" ~ step ~ "/import", zulu_button="Загрузить свежую выгрузку", card_optional=True %}
+{% include "_zulu_import.html" %}
+{% endwith %}
+<details class="legacy-import">
+  <summary>Файл старого калькулятора (JSON)</summary>
+  <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/import" class="import-form">
+    <input type="file" accept=".json,application/json" data-import-file required>
+    <textarea name="payload" hidden></textarea>
+    <button type="submit">Загрузить свежую выгрузку</button>
+  </form>
+</details>
 
 <div class="step-actions">
   <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/advance">

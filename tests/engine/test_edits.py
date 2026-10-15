@@ -4,14 +4,27 @@ import json
 
 import pytest
 
-from app.engine.criteria import criteria_step5
+from app.engine.criteria import criteria_step5 as criteria_step5_engine
 from app.engine.edits import ConsumerEdit, apply_edits, edited_cells
-from app.engine.legacy import parse_legacy_export
 from app.engine.meters import meter_checks, meter_for
-from app.engine.step4 import step4
-from app.engine.step5 import step5
+from app.engine.parsers.legacy import parse_legacy_export
+from app.engine.step4 import step4 as step4_engine
+from app.engine.step5 import step5 as step5_engine
+from app.engine.targets import heating_targets
 
 from .conftest import imported, raw
+
+
+def criteria_step5(snap, fact, shares=None):
+    return criteria_step5_engine(snap, fact, heating_targets(snap, fact.heating.G3, shares=shares))
+
+
+def step4(snap, kso_exception: bool = False):
+    return step4_engine(snap, heating_targets(snap, None), kso_exception=kso_exception)
+
+
+def step5(snap, fact, shares=None):
+    return step5_engine(snap, fact, heating_targets(snap, fact.heating.G3, shares=shares))
 
 
 def test_override_changes_the_meter_value() -> None:
@@ -82,14 +95,16 @@ def multi_input_snapshot():
     return parse_legacy_export(data).snapshot
 
 
-def test_multi_input_house_uses_split_meter_in_steps(fact) -> None:
+def test_multi_input_house_gets_one_kso_from_its_one_meter(fact) -> None:
+    # 2026-10-15: one meter = the whole building; one Kso per building,
+    # Kso = factor·ΣQ/Σ(Q/Kso) with factor = Q_meter / ΣQ_model (inputs had 0.751 and 0.638).
     snap = multi_input_snapshot()
-    # default split by Qo_r: 0.691158 / (0.691158 + 0.805581) = 46.2 % → 15.75 t/h for 33531
     res = step4(snap, kso_exception=True)
     kso = {r.target: r.enter for r in res.rows}
-    share = 0.691158 / (0.691158 + 0.805581)
-    q_31 = 0.761 * share
-    assert kso["33531"] == pytest.approx(round(0.751 * q_31 / 0.3646, 3), abs=1e-3)
+    q31, q35 = snap.consumer(33531).num("Q_sum"), snap.consumer(33535).num("Q_sum")
+    factor = 0.761 / (q31 + q35)
+    one = factor * (q31 + q35) / (q31 / 0.751 + q35 / 0.638)
+    assert kso["33531"] == kso["33535"] == pytest.approx(round(one, 3), abs=1e-3)
 
 
 def test_multi_input_shares_can_be_edited(fact) -> None:
@@ -98,6 +113,9 @@ def test_multi_input_shares_can_be_edited(fact) -> None:
     shares = {f"{guid}:heating": {33531: 0.5, 33535: 0.5}}
     crit = {c.key: c for c in criteria_step5(snap, fact, shares=shares)}
     assert crit["Gso:33531"].fact == pytest.approx(34.1 * 0.5)
-    res = step4(snap, kso_exception=True, shares=shares)
-    kso = {r.target: r.enter for r in res.rows}
-    assert kso["33531"] == pytest.approx(round(0.751 * (0.761 * 0.5) / 0.3646, 3), abs=1e-3)
+    targets = heating_targets(snap, fact.heating.G3, shares=shares)
+    assert targets.flows[33531].g == pytest.approx(34.1 * 0.5)
+    # without an edit the group meter is split by model flow
+    by_model = heating_targets(snap, fact.heating.G3)
+    g31, g35 = snap.consumer(33531).num("Gso"), snap.consumer(33535).num("Gso")
+    assert by_model.flows[33531].g == pytest.approx(34.1 * g31 / (g31 + g35))

@@ -3,12 +3,17 @@
 import pytest
 
 from app.engine.model import Consumer, Snapshot
-from app.engine.step5 import step5
+from app.engine.step5 import step5 as step5_engine
+from app.engine.targets import heating_targets
 
 from .conftest import by_target, imported
 
 WASHERS_FROM_IT6 = {"33523": 16.7, "33539": 24.0, "33525": 21.7, "36749": 36.9}
 SERIES_FROM_IT7 = {"33525": 17.5, "33531": 20.0, "33535": 21.5}
+
+
+def step5(snap, fact, shares=None):
+    return step5_engine(snap, fact, heating_targets(snap, fact.heating.G3, shares=shares))
 
 
 def test_washer_corrections_golden_from_it6(fact) -> None:

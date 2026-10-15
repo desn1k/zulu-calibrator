@@ -4,15 +4,11 @@ docs/algorithm.md: «Критерии шага 1…5», «Ловушки» (iden
 """
 
 from app.engine import config
-from app.engine.grouping import (
-    Shares,
-    group_consumers,
-    group_key,
-    house_meters,
-    split_multi_input,
-)
+from app.engine.dhw import DhwTarget
 from app.engine.meters import consumer_kind, meter_for
-from app.engine.model import Criterion, CtpFact, Snapshot
+from app.engine.model import DISTRUST_FIELD, Criterion, CtpFact, Snapshot
+from app.engine.schemes import ctp_scheme
+from app.engine.targets import HeatingTargets, model_heat
 
 
 def by_pct(
@@ -24,6 +20,15 @@ def by_pct(
     return Criterion(key, title, model, fact, dev, limit, "%", abs(dev) <= limit + 1e-9)
 
 
+def by_tol(key: str, title: str, model: float | None, fact: float | None) -> Criterion:
+    """Flow / heat / pressure drop: hard ±4 % (blocks the step) and the step target ±2 %
+    (a warning only) — approved 2026-10-15."""
+    hard, soft = config.TOLERANCE_PCT, config.STEP_FLOW_TARGET_PCT
+    c = by_pct(key, f"{title} ±{hard:g} % (цель ±{soft:g} %)", model, fact, hard)
+    return Criterion(c.key, c.title, c.model, c.fact, c.deviation, c.limit, c.unit, c.passed,
+                     c.note, soft)  # fmt: skip
+
+
 def by_abs(
     key: str, title: str, model: float | None, fact: float | None, limit: float
 ) -> Criterion:
@@ -33,7 +38,82 @@ def by_abs(
     return Criterion(key, title, model, fact, dev, limit, "°C", abs(dev) <= limit + 1e-9)
 
 
-def criteria_step1(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
+FIRST_CONTOUR_NOTE = "первый контур / прибор"
+
+
+def by_temp(
+    key: str,
+    title: str,
+    model: float | None,
+    fact: float | None,
+    supply_model: float | None,
+    supply_fact: float | None,
+) -> Criterion:
+    """«Допуск» for a return temperature: ±4 % of the value when the model supply is within 1 °C
+    of the meter; otherwise ±4 % on ΔT (supply − return), and the shift of the absolute T2 is
+    reported as «первый контур / прибор»."""
+    limit = config.TEMP_TOLERANCE_PCT
+    if model is None or not fact:
+        return Criterion(key, f"{title} ±{limit:g} %", model, fact, None, limit, "%", False)
+    if (
+        supply_model is None
+        or supply_fact is None
+        or abs(supply_model - supply_fact) <= config.TEMP_SUPPLY_MATCH_C
+    ):
+        c = by_pct(key, f"{title} ±{limit:g} %", model, fact, limit)
+        return c
+    dt_model, dt_fact = supply_model - model, supply_fact - fact
+    title = f"{title}: ΔT (подача − обратка) ±{limit:g} %"
+    if not dt_fact:
+        return Criterion(key, title, dt_model, dt_fact, None, limit, "%", False)
+    dev = (dt_model / dt_fact - 1.0) * 100.0
+    note = (
+        f"подача модели {supply_model:.1f} против прибора {supply_fact:.1f} °C, "
+        f"T2 {model - fact:+.1f} °C — {FIRST_CONTOUR_NOTE}"
+    )
+    return Criterion(key, title, dt_model, dt_fact, dev, limit, "%", abs(dev) <= limit + 1e-9, note)
+
+
+def criteria_step1(
+    snap: Snapshot, fact: CtpFact, dhw: DhwTarget | None = None, t4: float | None = None
+) -> list[Criterion]:
+    """Step 1 criteria by scheme. Scheme 2 (algorithm «Критерии шага 1»): Gverh > 0, T11_niz not
+    ≈ T1, T3so_t / T2so_t ±0,7 °C, Gsum_pod2 ±2 %, G ввода ±2 %, T2_t ввода (temperature rule).
+    Schemes of 2026-10-15: DHW at the CTP outlet ±1 °C, draw-off of the DHW objects ±4 %, DHW heat
+    ±4 % (parallel), Gverh > 0 (two-stage), heating temperatures and G ввода only with an
+    independent heating (CTP pumps); with direct heating the inlet closes by the house washers.
+    `dhw` — the DHW target; `t4` — the heating return used (a rejected CTP sensor replaced)."""
+    scheme = ctp_scheme(snap.card.get("N_schem"))
+    if scheme is None or scheme.n == 2 or dhw is None:
+        return criteria_step1_scheme2(snap, fact)
+    inlet, heating = fact.inlet, fact.heating
+    out = []
+    two_stage = scheme.dhw in ("two_stage_mixed", "two_stage_sequential")
+    if two_stage:
+        gverh = snap.card_num("Gverh")
+        out.append(Criterion("Gverh", "Gverh > 0 (II ступень работает)", gverh, None, None, 0.0,
+                             "", bool(gverh and gverh > 0)))  # fmt: skip
+    t_out = snap.card_num("T22_verh" if two_stage else "T22_niz")
+    out.append(by_abs("T_dhw", f"T ГВС на выходе ЦТП ±{config.STEP1_DHW_TEMP_C:g} °C", t_out,
+                      dhw.t_supply, config.STEP1_DHW_TEMP_C))  # fmt: skip
+    draw = sum(c.num("Ggv") or 0.0 for c in snap.consumers if consumer_kind(c.scheme) == "dhw")
+    out.append(by_tol("draw_off", "Разбор ГВС-объектов (Σ Ggv)", draw or None, dhw.draw_off))
+    if scheme.dhw == "parallel":
+        out.append(by_tol("Q_dhw", "Тепло ГВС ЦТП (Q_niz)", snap.card_num("Q_niz"), dhw.heat))
+    if scheme.heating == "independent" and heating is not None:
+        out.append(by_abs("T3so_t", "T3so_t (подача отопления) ±0,7 °C", snap.card_num("T3so_t"),
+                          heating.T3, config.STEP1_HEATING_TEMP_C))  # fmt: skip
+        ret = heating.T4 if t4 is None else t4
+        out.append(by_abs("T2so_t", "T2so_t (обратка отопления) ±0,7 °C", snap.card_num("T2so_t"),
+                          ret, config.STEP1_HEATING_TEMP_C))  # fmt: skip
+        out.append(by_tol("Gsum_pod", "G ввода", snap.card_num("Gsum_pod"),
+                          inlet.G1 if inlet else None))  # fmt: skip
+    out.append(by_temp("T2_t", "T2_t ввода", snap.card_num("T2_t"), inlet.T2 if inlet else None,
+                       snap.card_num("T1_t"), inlet.T1 if inlet else None))  # fmt: skip
+    return out
+
+
+def criteria_step1_scheme2(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
     inlet, heating = fact.inlet, fact.heating
     gverh = snap.card_num("Gverh")
     t11_niz, t1_model = snap.card_num("T11_niz"), snap.card_num("T1_t")
@@ -49,12 +129,11 @@ def criteria_step1(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
                heating.T3 if heating else None, config.STEP1_HEATING_TEMP_C),
         by_abs("T2so_t", "T2so_t (обратка отопления) ±0,7 °C", snap.card_num("T2so_t"),
                heating.T4 if heating else None, config.STEP1_HEATING_TEMP_C),
-        by_pct("Gsum_pod2", "Gsum_pod2 (расход 2 контура) ±2 %", snap.card_num("Gsum_pod2"),
-               heating.G3 if heating else None, config.STEP1_SECOND_CIRCUIT_FLOW_PCT),
-        by_pct("Gsum_pod", "G ввода ±2 %", snap.card_num("Gsum_pod"),
-               inlet.G1 if inlet else None, config.INLET_FLOW_PCT),
-        by_pct("T2_t", "T2_t ввода ±4 %", snap.card_num("T2_t"),
-               inlet.T2 if inlet else None, config.STEP1_INLET_T2_PCT),
+        by_tol("Gsum_pod2", "Gsum_pod2 (расход 2 контура)", snap.card_num("Gsum_pod2"),
+               heating.G3 if heating else None),
+        by_tol("Gsum_pod", "G ввода", snap.card_num("Gsum_pod"), inlet.G1 if inlet else None),
+        by_temp("T2_t", "T2_t ввода", snap.card_num("T2_t"), inlet.T2 if inlet else None,
+                snap.card_num("T1_t"), inlet.T1 if inlet else None),
     ]  # fmt: skip
 
 
@@ -96,62 +175,79 @@ def criteria_step2(
 
 def criteria_step3(snap: Snapshot, fact: CtpFact) -> list[Criterion]:
     return [
-        by_pct("Gsum_pod", "G ввода ±2 % от прибора", snap.card_num("Gsum_pod"),
-               fact.inlet.G1 if fact.inlet else None, config.INLET_FLOW_PCT)
+        by_tol("Gsum_pod", "G ввода от прибора", snap.card_num("Gsum_pod"),
+               fact.inlet.G1 if fact.inlet else None)
     ]  # fmt: skip
 
 
-def house_heat(snap: Snapshot, shares: Shares | None = None) -> list[Criterion]:
-    """Q_sum of each heating house ±5 %; houses without a usable meter are left out."""
-    meters = house_meters(snap.consumers, shares)
+def house_heat(
+    snap: Snapshot, targets: HeatingTargets, unmetered_heat: float | None = None
+) -> list[Criterion]:
+    """Heat of each metered building ±4 %, target ±2 % (a multi-input building as a whole);
+    the unmetered buildings together against their heat target when it is known."""
+    by_sys = {c.sys: c for c in snap.consumers}
     out = []
-    for c in snap.consumers:
-        m = meters.get(c.sys)
-        if consumer_kind(c.scheme) != "heating" or m is None or m.Q is None:
+    for mg in targets.metered:
+        if mg.meter.Q is None:
             continue
-        out.append(by_pct(f"Q_sum:{c.sys}", f"Sys {c.sys}: Q_sum ±5 %", c.num("Q_sum"), m.Q,
-                          config.HOUSE_HEAT_PCT))  # fmt: skip
+        model = sum(model_heat(by_sys[s]) or 0.0 for s in mg.sys_list)
+        if len(mg.sys_list) == 1:
+            [s] = mg.sys_list
+            out.append(by_tol(f"Q_sum:{s}", f"Sys {s}: Q", model, mg.meter.Q))
+        else:
+            label = "/".join(map(str, mg.sys_list))
+            out.append(
+                by_tol(f"Q_sum:group:{mg.sys_list[0]}", f"Дом {label}: ΣQ", model, mg.meter.Q)
+            )
+    if unmetered_heat and targets.unmetered:
+        model = sum(model_heat(c) or 0.0 for c in targets.unmetered)
+        out.append(by_tol("Q_sum:unmetered", "Дома без приборов: ΣQ", model, unmetered_heat))
     return out
 
 
-def criteria_step4(snap: Snapshot, shares: Shares | None = None) -> list[Criterion]:
-    return house_heat(snap, shares)
+def criteria_step4(
+    snap: Snapshot, targets: HeatingTargets, unmetered_heat: float | None = None
+) -> list[Criterion]:
+    return house_heat(snap, targets, unmetered_heat)
 
 
-def criteria_step5(snap: Snapshot, fact: CtpFact, shares: Shares | None = None) -> list[Criterion]:
-    """Gso per house (multi-input: each input ±5 %, the group ±2 %), Gsum_pod2, heat of houses.
-
-    Houses without a usable meter (none, or «не доверять») are left out.
-    """
+def criteria_step5(
+    snap: Snapshot,
+    fact: CtpFact,
+    targets: HeatingTargets,
+    unmetered_heat: float | None = None,
+) -> list[Criterion]:
+    """Gso of every heating input against its target, the multi-input building as a whole,
+    Gsum_pod2 and the heat of the buildings: hard ±4 %, step target ±2 % (warning).
+    Inputs without a target are left out."""
+    by_sys = {c.sys: c for c in snap.consumers}
     out = []
-    for g in group_consumers(snap.consumers):
-        if g.kind != "heating":
+    groups_done: set[tuple[int, ...]] = set()
+    for sys, t in targets.flows.items():
+        c = by_sys.get(sys)
+        if c is None or c.get(DISTRUST_FIELD):
             continue
-        if g.multi_input:
-            split = split_multi_input(g, (shares or {}).get(group_key(g)))
-            if not split:
-                continue
-            for c in g.members:
-                fact_g = split[c.sys].G1 if c.sys in split else None
-                title = f"Sys {c.sys}: Gso ±5 % (ввод многовводового дома)"
-                out.append(by_pct(f"Gso:{c.sys}", title, c.num("Gso"), fact_g,
-                                  config.MULTI_INPUT_EACH_PCT))  # fmt: skip
-            total_model = sum(c.num("Gso") or 0.0 for c in g.members)
-            total_fact = sum(m.G1 or 0.0 for m in split.values())
-            out.append(by_pct(f"Gso:group:{g.guid}", "Многовводовый дом: Σ Gso ±2 %",
-                              total_model, total_fact, config.MULTI_INPUT_GROUP_PCT))  # fmt: skip
+        if t.source == "meter":
+            out.append(by_tol(f"Gso:{sys}", f"Sys {sys}: Gso", c.num("Gso"), t.g))
             continue
-        [c] = g.members
-        m = meter_for(c)
-        if m is None or m.G1 is None:
+        if t.source == "remainder":
+            out.append(by_tol(f"Gso:{sys}", f"Sys {sys}: Gso (без прибора, остаток)",
+                              c.num("Gso"), t.g))  # fmt: skip
             continue
-        out.append(by_pct(f"Gso:{c.sys}", f"Sys {c.sys}: Gso ±2 %", c.num("Gso"), m.G1,
-                          config.HOUSE_FLOW_PCT))  # fmt: skip
+        out.append(by_tol(f"Gso:{sys}", f"Sys {sys}: Gso (ввод многовводового дома)",
+                          c.num("Gso"), t.g))  # fmt: skip
+        if t.members not in groups_done:
+            groups_done.add(t.members)
+            members = [by_sys[s] for s in t.members if s in by_sys]
+            total_model = sum(m.num("Gso") or 0.0 for m in members)
+            total_fact = sum(targets.flows[s].g for s in t.members if s in targets.flows)
+            guid = members[0].guid if members else t.members[0]
+            out.append(by_tol(f"Gso:group:{guid}", "Многовводовый дом: Σ Gso", total_model,
+                              total_fact))  # fmt: skip
 
-    out.append(by_pct("Gsum_pod2", "Gsum_pod2 ЦТП ±1 %", snap.card_num("Gsum_pod2"),
-                      fact.heating.G3 if fact.heating else None,
-                      config.CTP_SECOND_CIRCUIT_FLOW_PCT))  # fmt: skip
-    out.extend(house_heat(snap, shares))
+    g_heat = targets.g_heating or (fact.heating.G3 if fact.heating else None)
+    out.append(by_tol("Gsum_pod2", "Gsum_pod2 ЦТП", snap.card_num("Gsum_pod2"), g_heat))
+    out.extend(house_heat(snap, targets, unmetered_heat))
     return out
 
 
@@ -162,6 +258,7 @@ CARD_RESULT_FIELDS = (
 CONSUMER_RESULT_FIELDS = (
     "Gso",
     "Q_sum",
+    "Qsum",
     "T1_t",
     "T2_t",
     "Gcirc",

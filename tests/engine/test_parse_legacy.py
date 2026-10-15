@@ -4,7 +4,8 @@ import dataclasses
 import json
 from datetime import date
 
-from app.engine.legacy import PRIVATE_FIELDS, parse_legacy_export
+from app.engine.parsers.common import PRIVATE_FIELDS
+from app.engine.parsers.legacy import parse_legacy_export
 
 from .conftest import imported, raw
 
