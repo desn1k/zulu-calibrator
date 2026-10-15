@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.engine.criteria import (
     criteria_step1,
@@ -17,14 +17,17 @@ from app.engine.criteria import (
 )
 from app.engine.edits import ConsumerEdit, apply_edits
 from app.engine.grouping import Shares
+from app.engine.inputs import StepInputs, group_meters_from, step_inputs
 from app.engine.model import Criterion, CtpFact, Snapshot, StepResult
 from app.engine.parsers import ParsedInput, ParseError, parse_upload
+from app.engine.run_warnings import ctp_washer_plug, unexpected_washer_changes
+from app.engine.sql import DEFAULT_LAYER, sql_lines
 from app.engine.step1 import step1
 from app.engine.step2 import step2
 from app.engine.step3 import step3
 from app.engine.step4 import step4
 from app.engine.step5 import step5
-from app.models import ConsumerEditRow, Iteration, Project, StepState
+from app.models import ConsumerEditRow, Iteration, Project, SchemeStatus, StepState
 from app.services.serialize import (
     fact_from_dict,
     fact_to_dict,
@@ -32,8 +35,10 @@ from app.services.serialize import (
     snapshot_to_dict,
 )
 
-# intake → fact → meter checks → 1 → 2 → 3 → 4 → 5 → summary
+# intake → fact → meter checks → 1 → 2 → 3 → 4 → 5 → summary («Порядок 4 и 5»: 5 before 4 when
+# the house flows are off by more than 20 %, chosen on the step 4 page)
 STEPS = ["fact", "checks", "1", "2", "3", "4", "5", "summary"]
+STEPS_WASHERS_FIRST = ["fact", "checks", "1", "2", "3", "5", "4", "summary"]
 CALC_STEPS = ["1", "2", "3", "4", "5"]
 STEP_TITLES = {
     "fact": "Факт ЦТП",
@@ -162,8 +167,13 @@ def save_edits(session: Session, project: Project, edits: dict[int, ConsumerEdit
     session.commit()
 
 
+def steps_of(project: Project) -> list[str]:
+    return STEPS_WASHERS_FIRST if (project.settings or {}).get("washers_first") else STEPS
+
+
 def can_open(project: Project, step: str) -> bool:
-    return STEPS.index(step) <= STEPS.index(project.current_step)
+    order = steps_of(project)
+    return order.index(step) <= order.index(project.current_step)
 
 
 @dataclass
@@ -174,11 +184,16 @@ class StepView:
     identical: bool = False
     iteration: Iteration | None = None
     message: str = ""
-    warnings: list[str] = field(default_factory=list)  # import warnings of the latest export
+    warnings: list[str] = field(default_factory=list)  # import and run warnings
+    sql: list[str] = field(default_factory=list)  # Zulu UPDATE statements, one per line
+    inputs: StepInputs | None = None
 
     @property
     def passed(self) -> bool:
         return self.result is not None and all(c.passed for c in self.criteria)
+
+
+CIRCULATION = {"yes": True, "no": False}
 
 
 def step_view(project: Project) -> dict[str, Any]:
@@ -186,8 +201,103 @@ def step_view(project: Project) -> dict[str, Any]:
     return {
         "t22_niz": settings.get("t22_niz"),
         "t12_verh": settings.get("t12_verh"),
+        "t_o": settings.get("t_o"),
         "kso_exception": bool(settings.get("kso_exception")),
+        "kgv_mode": settings.get("kgv_mode") or "formula",
+        "circulation": settings.get("circulation") or "",
+        "layer": settings.get("layer") or DEFAULT_LAYER,
+        "washers_first": bool(settings.get("washers_first")),
+        "group_meters": settings.get("group_meters") or {},
     }
+
+
+def first_snapshot(project: Project) -> Snapshot | None:
+    if not project.iterations:
+        return None
+    return apply_edits(snapshot_from_dict(project.iterations[0].snapshot), edits_of(project))
+
+
+def inputs_of(project: Project, snap: Snapshot, fact: CtpFact) -> StepInputs:
+    s = step_view(project)
+    return step_inputs(
+        snap, fact, circulation=CIRCULATION.get(s["circulation"]),
+        group_meters=group_meters_from(s["group_meters"]), shares=shares_of(project),
+        base=first_snapshot(project),
+    )  # fmt: skip
+
+
+def step_result(
+    project: Project, step: str, snap: Snapshot, prev: Snapshot | None, fact: CtpFact
+) -> tuple[StepResult, StepInputs]:
+    s = step_view(project)
+    inputs = inputs_of(project, snap, fact)
+    circulation = CIRCULATION.get(s["circulation"])
+    if step == "1":
+        result = step1(
+            snap, fact, s["t22_niz"], s["t12_verh"], kgv_mode=s["kgv_mode"],
+            circulation=circulation, t_o=s["t_o"],
+        )  # fmt: skip
+    elif step == "2":
+        no_circulation = circulation is False or (
+            circulation is None and inputs.dhw is not None and not inputs.dhw.circulation
+        )
+        result = step2(snap, prev, circulation=False if no_circulation else circulation)
+    elif step == "3":
+        result = step3(snap, fact)
+    elif step == "4":
+        result = step4(
+            snap, inputs.targets, kso_exception=s["kso_exception"],
+            q_heating=inputs.validity.q_heating, loss=inputs.loss, base=first_snapshot(project),
+        )  # fmt: skip
+    else:
+        # Two H(G) points only for a second round of washers: the latest export is the result of
+        # a step 5 run («второй круг считают по двум точкам H(G) на вводе ЦТП»).
+        last = project.iterations[-1] if project.iterations else None
+        second_round = last is not None and last.step == "5" and snap is not prev
+        result = step5(snap, fact, inputs.targets, prev if second_round else None)
+    return result, inputs
+
+
+def step_criteria(
+    step: str, snap: Snapshot, prev: Snapshot | None, fact: CtpFact, result: StepResult,
+    inputs: StepInputs, kso_exception: bool,
+) -> list[Criterion]:  # fmt: skip
+    if step == "1":
+        heating = inputs.validity.fact.heating
+        return criteria_step1(snap, fact, inputs.dhw, heating.T4 if heating else None)
+    if step == "2":
+        if not result.rows and any("пропускается" in n for n in result.notes):
+            return []
+        return criteria_step2(snap, previous=prev, fact=fact)
+    if step == "3":
+        return criteria_step3(snap, fact)
+    if step == "4":
+        # Variant А changes nothing, so there is nothing to check.
+        return criteria_step4(snap, inputs.targets, inputs.unmetered_heat) if kso_exception else []
+    return criteria_step5(snap, fact, inputs.targets, inputs.unmetered_heat)
+
+
+def scheme_warnings(project: Project, snap: Snapshot) -> list[str]:
+    """The UI warns when a project uses a scheme that is not calibrated (AGENTS.md)."""
+    session = object_session(project)
+    if session is None:
+        return []
+    calibrated = {
+        (r.kind, r.n) for r in session.scalars(select(SchemeStatus)) if r.status == "calibrated"
+    }
+    out = []
+    n = snap.card.get("N_schem")
+    if isinstance(n, int) and ("ctp", n) not in calibrated:
+        out.append(f"Схема ЦТП {n} не откалибрована — расчёт «первая проверка».")
+    consumer = sorted(
+        {c.scheme for c in snap.consumers if ("consumer", c.scheme) not in calibrated}
+    )
+    if consumer:
+        out.append(
+            f"Схемы потребителей {', '.join(map(str, consumer))} не откалиброваны — "
+            "расчёт «первая проверка»."
+        )
+    return out
 
 
 def compute_step(project: Project, step: str) -> StepView:
@@ -195,35 +305,32 @@ def compute_step(project: Project, step: str) -> StepView:
     snap = effective_snapshot(project)
     if snap is None:
         return StepView(step, None, message="Нет выгрузки.")
-    fact, shares, s = fact_of(project), shares_of(project), step_view(project)
+    fact, s = fact_of(project), step_view(project)
+    prev = effective_snapshot(project, 1)
     last = project.iterations[-1]
     view = StepView(step, None, identical=last.identical_to_previous, iteration=last)
-    view.warnings = list(snap.warnings)
+    view.warnings = list(snap.warnings) + scheme_warnings(project, snap)
+    plug = ctp_washer_plug(snap, fact)
+    if plug:
+        view.warnings.append(plug)
     try:
-        if step == "1":
-            view.result = step1(snap, fact, s["t22_niz"], s["t12_verh"])
-            view.criteria = criteria_step1(snap, fact)
-        elif step == "2":
-            view.result = step2(snap)
-            view.criteria = criteria_step2(snap, previous=effective_snapshot(project, 1), fact=fact)
-        elif step == "3":
-            view.result = step3(snap, fact)
-            view.criteria = criteria_step3(snap, fact)
-        elif step == "4":
-            view.result = step4(snap, kso_exception=s["kso_exception"], shares=shares)
-            # Variant А changes nothing, so there is nothing to check.
-            view.criteria = criteria_step4(snap, shares) if s["kso_exception"] else []
-        elif step == "5":
-            view.result = step5(snap, fact, shares)
-            view.criteria = criteria_step5(snap, fact, shares)
-    except (TypeError, ValueError, ZeroDivisionError):
+        view.result, view.inputs = step_result(project, step, snap, prev, fact)
+        view.criteria = step_criteria(
+            step, snap, prev, fact, view.result, view.inputs, s["kso_exception"]
+        )
+        if prev is not None and last.step in CALC_STEPS:
+            issued, _ = step_result(project, last.step, prev, effective_snapshot(project, 2), fact)
+            view.warnings.extend(unexpected_washer_changes(prev, snap, issued.rows))
+        view.sql = sql_lines(view.result.rows, snap, s["layer"], project.ctp_name)
+    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
         view.result = None
         view.message = "Не хватает данных факта ЦТП для расчёта — проверьте страницу «Факт ЦТП»."
     return view
 
 
-def next_step(step: str) -> str:
-    return STEPS[STEPS.index(step) + 1]
+def next_step(project: Project, step: str) -> str:
+    order = steps_of(project)
+    return order[order.index(step) + 1]
 
 
 def finish_step(session: Session, project: Project, step: str, status: str, comment: str) -> None:
@@ -234,7 +341,7 @@ def finish_step(session: Session, project: Project, step: str, status: str, comm
         project.step_states.append(state)
     else:
         state.status, state.comment = status, comment
-    project.current_step = next_step(step)
+    project.current_step = next_step(project, step)
     if project.current_step == "summary":
         accepted = any(s.status == "accepted" for s in project.step_states)
         project.status = STATUS_DONE_WITH_DEVIATIONS if accepted else STATUS_DONE
@@ -259,6 +366,20 @@ def accept_with_deviation(session: Session, project: Project, step: str, comment
     if not comment.strip():
         raise StepError("Комментарий обязателен для «принять с отклонением».", 400)
     finish_step(session, project, step, "accepted", comment.strip())
+
+
+def washers_first(session: Session, project: Project, on: bool) -> None:
+    """«Порядок 4 и 5»: washers (step 5) before Kso (step 4). Switching on step 4 opens step 5."""
+    update_settings(session, project, washers_first=on)
+    if on and project.current_step == "4":
+        project.current_step = "5"
+    elif (
+        not on
+        and project.current_step == "5"
+        and not any(st.step == "4" for st in project.step_states)
+    ):
+        project.current_step = "4"
+    session.commit()
 
 
 def leave_checks(session: Session, project: Project) -> None:

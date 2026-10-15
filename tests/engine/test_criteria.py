@@ -5,12 +5,25 @@ from app.engine.criteria import (
     criteria_step1,
     criteria_step2,
     criteria_step3,
-    criteria_step4,
-    criteria_step5,
     results_identical,
 )
+from app.engine.criteria import (
+    criteria_step4 as criteria_step4_engine,
+)
+from app.engine.criteria import (
+    criteria_step5 as criteria_step5_engine,
+)
+from app.engine.targets import heating_targets
 
 from .conftest import imported
+
+
+def criteria_step4(snap):
+    return criteria_step4_engine(snap, heating_targets(snap, None))
+
+
+def criteria_step5(snap, fact, shares=None):
+    return criteria_step5_engine(snap, fact, heating_targets(snap, fact.heating.G3, shares=shares))
 
 
 def status(criteria) -> dict[str, bool]:

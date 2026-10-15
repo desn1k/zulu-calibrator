@@ -8,8 +8,19 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.engine import config
+from app.engine.dhw import (
+    DhwTarget,
+    choose_dhw_target,
+    hgv2_rows_values,
+    mixed_dependent_params,
+    parallel_params,
+    sequential_params,
+    stage2_correction,
+)
 from app.engine.meters import consumer_kind, meter_for
 from app.engine.model import CTP_TARGET, Consumer, CtpFact, Recommendation, Snapshot, StepResult
+from app.engine.schemes import Scheme, ctp_scheme
+from app.engine.validity import assess
 
 KGV_BY_HEAT_NOTE = "по теплу (расход не измерен)"
 DRAW_OFF_HINT = "T2 ввода физически не опустится до факта — допустимо принять с отклонением"
@@ -36,6 +47,7 @@ TEMP_FIELDS = {
 }  # fmt: skip
 FLOW_FIELDS = {"G1_i", "G2_i"}
 HEAT_FIELDS = {"Q_i_niz", "Q_i_verh"}
+HEAD_FIELDS = {"Hgv2_obr", "Hgv2_ras"}
 
 
 def round_field(name: str, value: float) -> float:
@@ -43,6 +55,8 @@ def round_field(name: str, value: float) -> float:
         return round(value, config.ROUND_Q)
     if name in FLOW_FIELDS:
         return round(value, config.ROUND_G)
+    if name in HEAD_FIELDS:
+        return round(value, config.ROUND_H)
     return round(value, config.ROUND_T)
 
 
@@ -171,13 +185,54 @@ def suggest_free_params(fact: CtpFact) -> tuple[float, float]:
     return t22_niz, t12_verh
 
 
-def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
-    """1.3: Kgv of DHW objects where the model draw-off differs from the house meter by > 10 %.
+KgvMode = Literal["formula", "model"]
+KGV_MODE_TITLES = {
+    "formula": "по Tgv объекта (формула 1.3)",
+    "model": "по расходу модели: Kgv·(G1 − G2)ф / Ggv",
+}
 
-    Kgv = (G1 − G2)·(Tgv − Thv)/(1000·Qgv_sred). If the draw-off is not measured
-    (G1 − G2 ≤ 0.05 t/h or missing): Kgv = Q_GVS / Qgv_sred, «по теплу (расход не измерен)».
-    The draw-off target is the house meters (the user's choice in check 7).
+
+def unmetered_dhw_draw(consumers: list[Consumer], ctp_supply: float | None) -> dict[int, float]:
+    """DHW objects without a meter get the rest of the CTP DHW supply meter (dead-end objects):
+    G_rest = G1_GVS ЦТП − Σ G1 of the metered DHW objects, split by Qgv_sred."""
+    dhw = [c for c in consumers if consumer_kind(c.scheme) == "dhw"]
+    unmetered = [c for c in dhw if meter_for(c) is None or meter_for(c).G1 is None]
+    if not unmetered or not ctp_supply:
+        return {}
+    metered = sum(meter_for(c).G1 for c in dhw if c not in unmetered)
+    rest = ctp_supply - metered
+    load = sum(c.num("Qgv_sred") or 0.0 for c in unmetered)
+    if rest <= 0 or load <= 0:
+        return {}
+    return {c.sys: rest * (c.num("Qgv_sred") or 0.0) / load for c in unmetered}
+
+
+def model_dhw_temperature(c: Consumer, thv: float) -> float | None:
+    """DHW temperature of the object Zulu used for its draw-off Ggv = 1000·Qgv_sred·Kgv/(T − Thv)
+    (falls back to T1_t)."""
+    ggv, qgv, kgv = c.num("Ggv"), c.num("Qgv_sred"), c.num("Kgv")
+    if ggv and qgv and kgv:
+        return thv + 1000.0 * qgv * kgv / ggv
+    return c.num("T1_t")
+
+
+def kgv_rows(
+    consumers: list[Consumer],
+    mode: KgvMode = "formula",
+    t_shift: float = 0.0,
+    ctp_supply: float | None = None,
+) -> list[Recommendation]:
+    """1.3: Kgv of DHW objects where the model draw-off differs from the house meter by more than
+    the tolerance.
+
+    - «formula» (algorithm 1.3): Kgv = (G1 − G2)·(Tgv − Thv)/(1000·Qgv_sred);
+    - «model» (example Чернышевского, approved 2026-10-15): Kgv·(G1 − G2)ф / Ggv — the model
+      draw-off at the model DHW temperature of the object, i.e. (G1 − G2)·(T1_t − Thv)/
+      (1000·Qgv_sred); `t_shift` adds the change of the CTP Tgv entered in the same run.
+    Draw-off not measured (G1 − G2 ≤ 0.05 t/h or missing): Kgv = Q_GVS / Qgv_sred, «по теплу
+    (расход не измерен)». An unmetered object gets the rest of the CTP DHW supply meter.
     """
+    rest = unmetered_dhw_draw(consumers, ctp_supply)
     rows = []
     for c in consumers:
         if consumer_kind(c.scheme) != "dhw":
@@ -186,12 +241,18 @@ def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
         qgv_sred, kgv = c.num("Qgv_sred"), c.num("Kgv")
         tgv, thv = c.num("Tgv"), c.num("Thv")
         thv = 5.0 if thv is None else thv
-        if m is None or not qgv_sred or kgv is None or tgv is None:
+        if not qgv_sred or kgv is None or tgv is None:
             continue
+        if m is None and c.sys in rest:
+            draw = rest[c.sys]
+            note = "остаток прибора ГВС ЦТП"
+        elif m is None:
+            continue
+        else:
+            draw, note = m.draw_off, ""
 
-        draw = m.draw_off
         if draw is None or draw <= config.KGV_NO_FLOW_T_H:
-            if m.Q is None:
+            if m is None or m.Q is None:
                 continue
             model_heat = qgv_sred * kgv
             if m.Q and abs(model_heat / m.Q - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT:
@@ -206,6 +267,24 @@ def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
             )  # fmt: skip
             continue
 
+        t_obj = model_dhw_temperature(c, thv)
+        if mode == "model" and t_obj is not None and t_obj >= config.KGV_MODEL_T_MIN_C:
+            model_draw = c.num("Ggv") or 1000.0 * qgv_sred * kgv / (t_obj - thv)
+            if abs(model_draw / draw - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT and not t_shift:
+                continue
+            # Kgv·Gф/Ggv; with a new CTP Tgv the model draw-off falls by (T − Thv)/(T + ΔT − Thv).
+            new = kgv * draw / model_draw * (t_obj + t_shift - thv) / (t_obj - thv)
+            shift = f" (+{t_shift:.1f} °C: новая Tgv ЦТП)" if t_shift else ""
+            rows.append(
+                Recommendation(
+                    str(c.sys), "Kgv", c.get("Kgv"), round(new, config.ROUND_KGV),
+                    f"1.3 по расходу модели: Kgv·Gф/Ggv, разбор модели {model_draw:.2f} т/ч "
+                    f"при T ГВС {t_obj:.1f}{shift} против {draw:.2f} т/ч",
+                    note=note,
+                )
+            )  # fmt: skip
+            continue
+
         model_draw = 1000.0 * qgv_sred * kgv / (tgv - thv)
         if abs(model_draw / draw - 1) * 100.0 <= config.KGV_DRAW_OFF_DIFF_PCT:
             continue
@@ -213,7 +292,8 @@ def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
         rows.append(
             Recommendation(
                 str(c.sys), "Kgv", c.get("Kgv"), new,
-                f"1.3: разбор модели {model_draw:.2f} т/ч против прибора {draw:.2f} т/ч",
+                f"1.3: разбор модели {model_draw:.2f} т/ч против {draw:.2f} т/ч",
+                note=note,
             )
         )  # fmt: skip
     return rows
@@ -223,6 +303,9 @@ def kgv_rows(consumers: list[Consumer]) -> list[Recommendation]:
 class Step1Result(StepResult):
     t2_balanced: float | None = None  # inlet T2 used for the test parameters (1.2)
     t2_meter: float | None = None
+    dhw_target: DhwTarget | None = None
+    shown: dict[str, float] = field(default_factory=dict)  # Gр, Gп, Tо, Gгв … for the page
+    kgv_mode: str = "formula"
 
 
 def houses_draw_off(consumers: list[Consumer]) -> float:
@@ -241,57 +324,64 @@ def same_value(current, enter: float, name: str) -> bool:
     return round_field(name, float(current)) == enter
 
 
+def add_ctp_rows(res: "Step1Result", card: dict, values: dict[str, float], reason: str) -> None:
+    for name, value in values.items():
+        enter = round_field(name, value)
+        current = card.get(name)
+        if not same_value(current, enter, name):
+            res.rows.append(Recommendation(CTP_TARGET, name, current, enter, reason))
+
+
+def stage2_configured(card: dict, values: dict[str, float]) -> bool:
+    """Stage II test temperatures in the card are the computed ones (only Q_i_verh is tuned)."""
+    names = ("T11_i_verh", "T12_i_verh", "T21_i_verh", "T22_i_verh")
+    return all(same_value(card.get(n), round_field(n, values[n]), n) for n in names)
+
+
+NEW_SCHEMES = frozenset({3, 5, 6, 12})
+
+
 def step1(
     snap: Snapshot,
     fact: CtpFact,
     t22_niz: float | None = None,
     t12_verh: float | None = None,
     draw_off_source: Literal["houses", "ctp"] = "houses",
+    *,
+    kgv_mode: KgvMode = "formula",
+    circulation: bool | None = None,
+    t_o: float | None = None,
 ) -> Step1Result:
-    """`draw_off_source` is the user's answer to check 7 (target of Kgv); only «дома» for now."""
+    """`draw_off_source` is the user's answer to check 7 (target of Kgv); only «дома» for now.
+    `circulation` — «есть ли циркуляция от ЦТП» (None: by the CTP DHW meter); `t_o` — Tо of the
+    parallel DHW (None: chosen automatically)."""
     if draw_off_source != "houses":
         raise NotImplementedError("Kgv target «верим ЦТП» is not implemented yet")
-    res = Step1Result(step="1", do_not_touch=list(STEP1_DO_NOT_TOUCH))
+    res = Step1Result(step="1", do_not_touch=list(STEP1_DO_NOT_TOUCH), kgv_mode=kgv_mode)
     card = snap.card
+    n_schem = card.get("N_schem")
+    scheme = ctp_scheme(n_schem)
+    t_shift = 0.0
 
-    choice = choose_scheme(fact)
-    if card.get("N_schem") != choice.n_schem:
-        res.rows.append(
-            Recommendation(CTP_TARGET, "N_schem", card.get("N_schem"), choice.n_schem,
-                           f"1.1: {choice.reason}")
-        )  # fmt: skip
+    if n_schem in (2, 3) or scheme is None:
+        choice = choose_scheme(fact)
+        if n_schem != choice.n_schem:
+            res.rows.append(
+                Recommendation(CTP_TARGET, "N_schem", n_schem, choice.n_schem,
+                               f"1.1: {choice.reason}")
+            )  # fmt: skip
+            n_schem, scheme = choice.n_schem, ctp_scheme(choice.n_schem)
 
-    if choice.n_schem != 2:
-        res.notes.append(
-            f"Схема {choice.n_schem}: расчёт испытательных параметров пока только для 2."
-        )
-    elif fact.dhw is None or fact.inlet is None or fact.heating is None:
-        res.questions.append("Для шага 1.2 нужны приборы ввода, отопления и ГВС ЦТП.")
+    if n_schem == 2:
+        scheme2_rows(res, snap, fact, t22_niz, t12_verh)
+    elif scheme is not None and n_schem in NEW_SCHEMES:
+        t_shift = new_scheme_rows(res, snap, fact, scheme, t22_niz, t12_verh, circulation, t_o)
     else:
-        if t22_niz is None or t12_verh is None:
-            s22, s12 = suggest_free_params(fact)
-            t22_niz = s22 if t22_niz is None else t22_niz
-            t12_verh = s12 if t12_verh is None else t12_verh
-        p = scheme2_test_params(fact, t22_niz, t12_verh)
-        res.t2_balanced, res.t2_meter = p.t2_balanced, p.t2_meter
-        for name, enter in p.rounded().items():
-            current = card.get(name)
-            if not same_value(current, enter, name):
-                res.rows.append(Recommendation(CTP_TARGET, name, current, enter, "1.2: схема 2"))
-        res.notes.extend(p.notes)
         res.notes.append(
-            f"Замыкание: G1_i·(T1 − T12_i)/1000 = {p.closure_rounded:.3f} против Qсо {p.qso:.3f}"
-            + ("" if p.closure_ok else " — не сходится, сдвинуть T22_niz / T12_verh")
+            f"Схема {n_schem}: «первая проверка» — испытательные параметры пока не считаются."
         )
-        if not p.t12_i_gap_ok:
-            res.questions.append("T12_i < T21_i + 0,8 — сдвинуть T22_niz / T12_verh.")
-        if not p.t12_verh_ok:
-            res.questions.append("T12_verh должна быть ≥ T21_verh + 2.")
-        # «Если верим домам, а разбор ЦТП больше, I ступень физически не охладит обратку до факта»
-        if houses_draw_off(snap.consumers) < p.draw_off:
-            res.notes.append(DRAW_OFF_HINT)
 
-    if card.get("Regul_T") != 1:
+    if card.get("Regul_T") != 1 and not (scheme and scheme.dhw == "two_stage_sequential"):
         res.rows.append(
             Recommendation(CTP_TARGET, "Regul_T", card.get("Regul_T"), 1, "1.2: ЦТП держит Tгв")
         )
@@ -302,5 +392,180 @@ def step1(
                 "(справка Zulu) — укажите потерю напора ТО."
             )
 
-    res.rows.extend(kgv_rows(snap.consumers))
+    ctp_supply = fact.dhw.Gp if fact.dhw else None
+    res.rows.extend(kgv_rows(snap.consumers, kgv_mode, t_shift, ctp_supply))
     return res
+
+
+def scheme2_rows(
+    res: Step1Result, snap: Snapshot, fact: CtpFact, t22_niz: float | None, t12_verh: float | None
+) -> None:
+    card = snap.card
+    if fact.dhw is None or fact.inlet is None or fact.heating is None:
+        res.questions.append("Для шага 1.2 нужны приборы ввода, отопления и ГВС ЦТП.")
+        return
+    if t22_niz is None or t12_verh is None:
+        s22, s12 = suggest_free_params(fact)
+        t22_niz = s22 if t22_niz is None else t22_niz
+        t12_verh = s12 if t12_verh is None else t12_verh
+    p = scheme2_test_params(fact, t22_niz, t12_verh)
+    res.t2_balanced, res.t2_meter = p.t2_balanced, p.t2_meter
+    for name, enter in p.rounded().items():
+        current = card.get(name)
+        if not same_value(current, enter, name):
+            res.rows.append(Recommendation(CTP_TARGET, name, current, enter, "1.2: схема 2"))
+    res.notes.extend(p.notes)
+    res.notes.append(
+        f"Замыкание: G1_i·(T1 − T12_i)/1000 = {p.closure_rounded:.3f} против Qсо {p.qso:.3f}"
+        + ("" if p.closure_ok else " — не сходится, сдвинуть T22_niz / T12_verh")
+    )
+    if not p.t12_i_gap_ok:
+        res.questions.append("T12_i < T21_i + 0,8 — сдвинуть T22_niz / T12_verh.")
+    if not p.t12_verh_ok:
+        res.questions.append("T12_verh должна быть ≥ T21_verh + 2.")
+    # «Если верим домам, а разбор ЦТП больше, I ступень физически не охладит обратку до факта»
+    if houses_draw_off(snap.consumers) < p.draw_off:
+        res.notes.append(DRAW_OFF_HINT)
+
+
+def mixed_inlet_flow(fact: CtpFact, channels) -> float | None:
+    """Valid inlet flow of a mixed scheme: the accepted inlet channel, else G1 (or G2)."""
+    inlet = fact.inlet
+    for ch in channels:
+        if not ch.rejected and ch.name in ("G1_TS", "G2_TS"):
+            return inlet.G1 if ch.name == "G1_TS" else inlet.G2
+    return inlet.G1 if inlet.G1 is not None else inlet.G2
+
+
+def new_scheme_rows(
+    res: Step1Result,
+    snap: Snapshot,
+    fact: CtpFact,
+    scheme: Scheme,
+    t22_niz: float | None,
+    t12_verh: float | None,
+    circulation: bool | None,
+    t_o: float | None,
+) -> float:
+    """Schemes 3, 5, 6, 12. Returns the Tgv change entered in this run (for «Kgv по модели»)."""
+    card, n = snap.card, scheme.n
+    if fact.inlet is None or fact.heating is None or fact.dhw is None:
+        res.questions.append("Для шага 1 нужны приборы ввода, отопления и ГВС ЦТП.")
+        return 0.0
+    target = choose_dhw_target(fact, snap.consumers, circulation)
+    res.dhw_target = target
+    res.notes.append(f"Цель ГВС: {target.reason}.")
+    res.notes.extend(target.notes)
+    if target.draw_off is None or target.t_supply is None or target.heat is None:
+        res.questions.append("Нет разбора ГВС по домам или Tгв прибора ЦТП — шаг 1 не посчитать.")
+        return 0.0
+    if not target.circulation:
+        res.do_not_touch.append("Kcirc / Hcirc / Tcirc (циркуляции от ЦТП нет, шаг 2 пропускается)")
+
+    reason = f"1.2: схема {n}"
+    dead_end = not target.circulation
+    if scheme.dhw == "two_stage_mixed":
+        # Split of the inlet between stage II and heating: first with the computed stage II
+        # flow, then the channel check uses it.
+        guess = mixed_dependent_params(
+            fact, target, fact.inlet.G2 or fact.inlet.G1 or 0.0,
+            t22_niz if t22_niz is not None else fact.mode.thv + 20.0, t12_verh,
+        )  # fmt: skip
+        validity = assess(snap, fact, inlet_split=guess.shown["Gверх"], dhw_heat=target.heat)
+    else:
+        validity = assess(snap, fact, dhw_heat=target.heat)
+    eff = validity.fact
+    res.notes.extend(validity.proofs)
+
+    if scheme.dhw == "two_stage_sequential":
+        p = sequential_params(eff, target, t22_niz, t12_verh)
+        if stage2_configured(card, p.values):
+            stage1 = {k: v for k, v in p.values.items() if k.endswith("_niz")}
+            add_ctp_rows(res, card, stage1, reason)
+            stage2_tuning(res, snap, target)
+        else:
+            add_ctp_rows(res, card, p.values, reason)
+            res.notes.append(
+                "II ступень в схеме 12 видно по T ГВС на выходе ЦТП, а не по T1 отопления; "
+                "через неё Zulu пропускает около четверти испытательного расхода — Q_i_verh "
+                "подбирается по T ГВС после расчёта."
+            )
+    elif scheme.dhw == "parallel":
+        p = parallel_params(eff, target, t_o, scheme.heating == "independent")
+        add_ctp_rows(res, card, p.values, reason)
+    elif scheme.dhw == "two_stage_mixed":
+        if t22_niz is None:
+            res.questions.append("Задайте T22_niz (свободный параметр I ступени).")
+            t22_niz = round(eff.mode.thv + 20.0, 1)
+        g_inlet = mixed_inlet_flow(eff, validity.channels) or 0.0
+        p = mixed_dependent_params(eff, target, g_inlet, t22_niz, t12_verh)
+        add_ctp_rows(res, card, p.values, reason)
+    else:
+        return 0.0
+    res.shown.update(p.shown)
+    res.notes.extend(p.notes)
+    res.questions.extend(p.questions)
+
+    t_shift = 0.0
+    tgv_card = snap.card_num("Tgv")
+    if tgv_card is None or round(tgv_card, 1) != round(target.t_supply, 1):
+        res.rows.append(
+            Recommendation(CTP_TARGET, "Tgv", card.get("Tgv"), round(target.t_supply, 1),
+                           "Tgv = Tгв прибора ЦТП")
+        )  # fmt: skip
+        if tgv_card is not None:
+            t_shift = target.t_supply - tgv_card
+
+    hgv2 = hgv2_rows_values(snap.card_num("H_geo"), eff, dead_end)
+    if hgv2:
+        now = (snap.card_num("Hgv2_obr") or 0.0) + (snap.card_num("Hgv2_ras") or 0.0)
+        need = hgv2["Hgv2_obr"] + hgv2["Hgv2_ras"]
+        if not dead_end or abs(now - need) > config.HGV2_SUM_TOL_M:
+            why = (
+                "тупиковая ГВС: Hgv2_obr + Hgv2_ras = H_geo + P1_GVS"
+                if dead_end
+                else "Hgv2_obr = H_geo + P2_GVS, Hgv2_ras = P1_GVS − P2_GVS"
+            )
+            add_ctp_rows(res, card, hgv2, why)
+        res.do_not_touch = [f for f in res.do_not_touch if not f.startswith("Hgv2")]
+    dhw_return_pressure_check(res, snap)
+    return t_shift
+
+
+def stage2_tuning(res: Step1Result, snap: Snapshot, target: DhwTarget) -> None:
+    """Scheme 12, stage II configured: tune Q_i_verh by T DHW at the CTP outlet."""
+    t_out, tgv = snap.card_num("T22_verh"), target.t_supply
+    q_i, q_model = snap.card_num("Q_i_verh"), snap.card_num("Q_verh")
+    t21 = snap.card_num("T21_verh")
+    if None in (t_out, q_i, q_model, t21):
+        return
+    if abs(t_out - tgv) <= config.STEP1_DHW_TEMP_C:
+        res.notes.append(f"T ГВС на выходе ЦТП {t_out:g} против {tgv:g} °C — II ступень сошлась.")
+        return
+    new = stage2_correction(q_i, q_model, target.supply, tgv, t21)
+    if new is None:
+        res.questions.append("II ступень не работает (Q_verh = 0) — проверить испытательные.")
+        return
+    q_needed = target.supply * (tgv - t21) / 1000.0
+    res.rows.append(
+        Recommendation(
+            CTP_TARGET, "Q_i_verh", q_i, round(new, config.ROUND_Q),
+            f"II ступень: T ГВС {t_out:g} против {tgv:g} °C; Q_i_verh·Q_нужно/Q_verh = "
+            f"{q_i:g}·{q_needed:.4f}/{q_model:g}",
+        )
+    )  # fmt: skip
+
+
+def dhw_return_pressure_check(res: Step1Result, snap: Snapshot) -> None:
+    """Hgv2_obr must keep the DHW return pressure positive at every DHW building — otherwise
+    Zulu disconnects the building (example Пионерская)."""
+    bad = [
+        c.sys
+        for c in snap.consumers
+        if consumer_kind(c.scheme) == "dhw" and c.num("Pobr") is not None and c.num("Pobr") <= 0
+    ]
+    if bad:
+        res.questions.append(
+            f"Давление в обратке ГВС ≤ 0 у Sys {', '.join(map(str, bad))} — Zulu отключит дом: "
+            "поднять Hgv2_obr (не ниже H_geo дома + разумный напор)."
+        )

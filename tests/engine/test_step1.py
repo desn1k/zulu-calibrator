@@ -74,7 +74,8 @@ def test_suggested_free_params_respect_rules(fact) -> None:
 def test_kgv_golden_from_it0(fact) -> None:
     rows = kgv_rows(imported("it0_initial").snapshot.consumers)
     kgv = by_target(rows, "Kgv")
-    assert kgv == {"33553": 0.36, "33559": 0.31, "33561": 0.25, "33567": 0.07}
+    # README gives 2 decimals (0.36 / 0.31 / 0.25 / 0.07); Kgv is now rounded to 3.
+    assert kgv == {"33553": 0.361, "33559": 0.31, "33561": 0.25, "33567": 0.072}
 
 
 def test_kgv_without_measured_flow_falls_back_to_heat() -> None:
@@ -85,7 +86,7 @@ def test_kgv_without_measured_flow_falls_back_to_heat() -> None:
     assert all(r.note != KGV_BY_HEAT_NOTE for r in others)
 
 
-def test_kgv_within_10_percent_is_not_changed() -> None:
+def test_kgv_within_tolerance_is_not_changed() -> None:
     rows = kgv_rows(imported("it0_initial").snapshot.consumers)
     assert {"33551", "33569", "33573", "33575"}.isdisjoint({r.target for r in rows})
 
@@ -98,7 +99,7 @@ def test_step1_result_on_initial_state(fact) -> None:
     assert ctp["T11_i_niz"] == (70, 60.9)
     assert ctp["Q_i_verh"] == (1.5, 0.178)
     assert "N_schem" not in ctp  # already 2
-    assert by_target(res.rows, "Kgv")["33553"] == 0.36
+    assert by_target(res.rows, "Kgv")["33553"] == 0.361
 
     for field in ("Kso", "Qo_r", "Qgv_sred", "Dshb_pod_u", "Hgv2_ras", "Hgv2_obr"):
         assert field in res.do_not_touch
