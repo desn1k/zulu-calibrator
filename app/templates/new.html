@@ -1,15 +1,24 @@
 {% extends "base.html" %}
 
 {% block title %}Новый расчёт ЦТП{% endblock %}
-{% block head %}<script src="/static/import.js" defer></script>{% endblock %}
+{% block head %}
+<script src="/static/xlsx-0.20.3.mini.min.js" defer></script>
+<script src="/static/import.js" defer></script>
+{% endblock %}
 
 {% block content %}
 <h1>Новый расчёт ЦТП</h1>
-<p>Выберите JSON-файл старого калькулятора («Собрать файл для разбора»).
-  Имена и адреса потребителей (Name, Bld, Adres) удаляются в браузере до отправки.</p>
-<form method="post" action="/projects" class="import-form">
-  <input type="file" accept=".json,application/json" data-import-file required>
-  <textarea name="payload" hidden></textarea>
-  <button type="submit">Создать расчёт</button>
-</form>
+
+<h2>Из Zulu</h2>
+<p>Имена и адреса (Name, Bld, Adres, FIAS_Adress, FIAS_ID, UUTE_Name) удаляются в браузере до отправки.</p>
+{% include "_zulu_import.html" %}
+
+<details class="legacy-import">
+  <summary>Файл старого калькулятора (JSON)</summary>
+  <form method="post" action="/projects" class="import-form">
+    <input type="file" accept=".json,application/json" data-import-file required>
+    <textarea name="payload" hidden></textarea>
+    <button type="submit">Создать расчёт</button>
+  </form>
+</details>
 {% endblock %}

@@ -11,7 +11,7 @@ from app.engine.criteria import CARD_RESULT_FIELDS, CONSUMER_RESULT_FIELDS
 from app.engine.edits import ConsumerEdit, edited_cells
 from app.engine.grouping import group_consumers, group_key, load_of
 from app.engine.meters import BLOCK_KEYS, consumer_kind, meter_checks, meter_for
-from app.engine.model import CtpFact, DhwFact, HeatingFact, InletFact, Mode
+from app.engine.model import CtpFact, DhwFact, HeatingFact, InletFact, Mode, VentFact
 from app.engine.units import PressureUnit, pressure_to_m
 from app.models import Project
 from app.routes.pages import ru, templates
@@ -23,10 +23,12 @@ router = APIRouter()
 INLET_FIELDS = ["G1", "G2", "T1", "T2", "P1", "P2", "Q"]
 HEATING_FIELDS = ["G3", "G4", "T3", "T4", "P3", "P4", "Q"]
 DHW_FIELDS = ["Gp", "Gc", "Tgv", "Tc", "Pp", "Pc", "Q"]
+VENT_FIELDS = ["G1", "G2", "T1", "T2", "P1", "P2", "Q"]
 FACT_BLOCKS = [
     ("inlet", "Ввод (теплосеть)", INLET_FIELDS),
     ("heating", "Отопление после ЦТП", HEATING_FIELDS),
     ("dhw", "ГВС ЦТП", DHW_FIELDS),
+    ("vent", "Вентиляция ЦТП (пока не проверяется)", VENT_FIELDS),
 ]
 FIELD_LABELS = {"Gp": "Gп", "Gc": "Gц", "Tgv": "Tгв", "Tc": "Tц", "Pp": "Pп", "Pc": "Pц"}
 BLOCKS = ["OT", "TS", "GVS", "SV"]
@@ -169,6 +171,7 @@ def fact_from_form(form: Any) -> CtpFact:
         heating=HeatingFact(**blocks["heating"]) if blocks["heating"] else None,
         dhw=DhwFact(**blocks["dhw"]) if blocks["dhw"] else None,
         mode=mode,
+        vent=VentFact(**blocks["vent"]) if blocks["vent"] else None,
     )
 
 

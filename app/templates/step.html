@@ -2,6 +2,7 @@
 
 {% block title %}{{ title }} — {{ project.ctp_name }}{% endblock %}
 {% block head %}
+<script src="/static/xlsx-0.20.3.mini.min.js" defer></script>
 <script src="/static/import.js" defer></script>
 <script src="/static/copy.js" defer></script>
 {% endblock %}
@@ -16,6 +17,9 @@
 {% if view.message %}<p class="error">{{ view.message }}</p>{% endif %}
 {% if view.identical %}
 <p class="warning">Результаты свежей выгрузки идентичны предыдущей — правка не внесена или поверочный расчёт не запущен.</p>
+{% endif %}
+{% if view.warnings %}
+{% for w in view.warnings %}<p class="warning">{{ w }}</p>{% endfor %}
 {% endif %}
 {% if view.iteration %}
 <p class="muted">Расчёт по выгрузке №{{ view.iteration.number }} ({{ view.iteration.created_at.strftime("%d.%m.%Y %H:%M") if view.iteration.created_at else "" }}).</p>
@@ -118,11 +122,17 @@
 {% if is_current %}
 <h2>Поверочный расчёт</h2>
 <p class="muted">Внесите значения в Zulu, сделайте поверочный расчёт и загрузите свежую выгрузку.</p>
-<form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/import" class="import-form">
-  <input type="file" accept=".json,application/json" data-import-file required>
-  <textarea name="payload" hidden></textarea>
-  <button type="submit">Загрузить свежую выгрузку</button>
-</form>
+{% with zulu_action="/projects/" ~ project.id ~ "/steps/" ~ step ~ "/import", zulu_button="Загрузить свежую выгрузку", card_optional=True %}
+{% include "_zulu_import.html" %}
+{% endwith %}
+<details class="legacy-import">
+  <summary>Файл старого калькулятора (JSON)</summary>
+  <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/import" class="import-form">
+    <input type="file" accept=".json,application/json" data-import-file required>
+    <textarea name="payload" hidden></textarea>
+    <button type="submit">Загрузить свежую выгрузку</button>
+  </form>
+</details>
 
 <div class="step-actions">
   <form method="post" action="/projects/{{ project.id }}/steps/{{ step }}/advance">

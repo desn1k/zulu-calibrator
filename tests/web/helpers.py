@@ -4,7 +4,7 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
-from tests.engine.conftest import raw
+from tests.engine.conftest import raw, zulu_raw
 
 README_FACT = {
     "inlet_G1": "98.4", "inlet_G2": "99.7", "inlet_T1": "89.2", "inlet_T2": "57",
@@ -52,3 +52,23 @@ def db_dump(db_url: str) -> str:
         return "\n".join(str(row) for t in tables for row in conn.execute(f'SELECT * FROM "{t}"'))  # noqa: S608
     finally:
         conn.close()
+
+
+def zulu_payload(
+    name: str, iteration: str, card: bool = True, private_value: str | None = None
+) -> str:
+    """What app/static/import.js sends for a real Zulu set (optionally with private values the
+    browser would have dropped, to test the server-side filter)."""
+    text, rows = zulu_raw(name, iteration)
+    rows = [dict(r) for r in rows]
+    if private_value:
+        for r in rows:
+            r.update(
+                Name=f"ул. {private_value}",
+                Adres=private_value,
+                FIAS_Adress=private_value,
+                UUTE_Name=private_value,
+            )
+        text = (text or "") + f"Adres\t{private_value}\n"
+    data = {"format": "zulu", "card": text if card else "", "consumers": rows}
+    return json.dumps(data, ensure_ascii=False)

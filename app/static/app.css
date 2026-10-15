@@ -91,3 +91,9 @@ nav.steps .project-name { font-weight: 600; margin-bottom: 4px; }
 nav.steps ol { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0; margin: 0; list-style: none; font-size: 0.9em; }
 nav.steps li.current a { font-weight: 700; }
 nav.steps li.locked { color: var(--muted); }
+
+/* Zulu import */
+label.block { display: block; margin: 8px 0; }
+label.block textarea, label.block input[type=file] { display: block; margin-top: 4px; }
+textarea[data-card] { width: 100%; max-width: 48em; font-family: ui-monospace, monospace; }
+details.legacy-import { margin: 12px 0; }

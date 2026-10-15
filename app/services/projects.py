@@ -17,8 +17,8 @@ from app.engine.criteria import (
 )
 from app.engine.edits import ConsumerEdit, apply_edits
 from app.engine.grouping import Shares
-from app.engine.legacy import parse_legacy_export
 from app.engine.model import Criterion, CtpFact, Snapshot, StepResult
+from app.engine.parsers import ParsedInput, ParseError, parse_upload
 from app.engine.step1 import step1
 from app.engine.step2 import step2
 from app.engine.step3 import step3
@@ -59,29 +59,33 @@ class StepError(Exception):
         self.status = status
 
 
-def parse_payload(payload: str) -> dict[str, Any]:
+def parse_payload(payload: str, previous: Snapshot | None = None) -> ParsedInput:
+    """Data sent by app/static/import.js: Zulu card + consumers, or the old calculator export."""
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as e:
-        raise StepError("Файл не похож на JSON выгрузки калькулятора.", 400) from e
-    if not isinstance(data, dict) or "дома" not in data or "карточка_ЦТП" not in data:
-        raise StepError("В файле нет карточки ЦТП или списка потребителей.", 400)
-    return data
+        raise StepError("Данные импорта не прочитаны — выберите файл ещё раз.", 400) from e
+    if not isinstance(data, dict):
+        raise StepError("Данные импорта не прочитаны — выберите файл ещё раз.", 400)
+    try:
+        return parse_upload(data, previous)  # private fields are dropped here
+    except ParseError as e:
+        raise StepError(str(e), 400) from e
 
 
 def create_project(session: Session, payload: str) -> Project:
-    imp = parse_legacy_export(parse_payload(payload))  # private fields are dropped here
+    parsed = parse_payload(payload)
+    snap = parsed.snapshot
+    fact = parsed.fact or CtpFact(inlet=None, heating=None, dhw=None)
     project = Project(
-        ctp_name=imp.snapshot.ctp_name or "ЦТП без имени",
-        measured_on=imp.snapshot.measured_on,
+        ctp_name=snap.ctp_name or "ЦТП без имени",
+        measured_on=snap.measured_on,
         status=STATUS_IN_WORK,
         current_step="fact",
-        fact=fact_to_dict(imp.fact),
+        fact=fact_to_dict(fact),
         settings={},
     )
-    project.iterations.append(
-        Iteration(number=1, step="intake", snapshot=snapshot_to_dict(imp.snapshot))
-    )
+    project.iterations.append(Iteration(number=1, step="intake", snapshot=snapshot_to_dict(snap)))
     session.add(project)
     session.commit()
     return project
@@ -90,8 +94,8 @@ def create_project(session: Session, payload: str) -> Project:
 def add_iteration(session: Session, project: Project, payload: str, step: str) -> Iteration:
     if step != project.current_step:
         raise StepError("Свежую выгрузку можно загрузить только на открытом шаге.")
-    snap = parse_legacy_export(parse_payload(payload)).snapshot
     previous = raw_snapshot(project)
+    snap = parse_payload(payload, previous).snapshot
     it = Iteration(
         number=len(project.iterations) + 1,
         step=step,
@@ -170,6 +174,7 @@ class StepView:
     identical: bool = False
     iteration: Iteration | None = None
     message: str = ""
+    warnings: list[str] = field(default_factory=list)  # import warnings of the latest export
 
     @property
     def passed(self) -> bool:
@@ -193,6 +198,7 @@ def compute_step(project: Project, step: str) -> StepView:
     fact, shares, s = fact_of(project), shares_of(project), step_view(project)
     last = project.iterations[-1]
     view = StepView(step, None, identical=last.identical_to_previous, iteration=last)
+    view.warnings = list(snap.warnings)
     try:
         if step == "1":
             view.result = step1(snap, fact, s["t22_niz"], s["t12_verh"])

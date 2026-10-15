@@ -6,8 +6,8 @@ import pytest
 
 from app.engine.criteria import criteria_step5
 from app.engine.edits import ConsumerEdit, apply_edits, edited_cells
-from app.engine.legacy import parse_legacy_export
 from app.engine.meters import meter_checks, meter_for
+from app.engine.parsers.legacy import parse_legacy_export
 from app.engine.step4 import step4
 from app.engine.step5 import step5
 

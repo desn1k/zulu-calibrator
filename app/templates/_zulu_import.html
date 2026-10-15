@@ -1,0 +1,14 @@
+{# Zulu import: CTP card text + consumer export. The raw card and file have no `name`, so only the
+   cleaned JSON prepared by import.js is sent. `zulu_action`, `zulu_button`, `card_optional`. #}
+<form method="post" action="{{ zulu_action|default('/projects') }}" class="zulu-import-form">
+  <label class="block">Карточка ЦТП из Zulu (строки «поле — значение»)
+    {% if card_optional %}<span class="muted small">— можно не вставлять, тогда возьмём предыдущую</span>{% endif %}
+    <textarea data-card rows="6" {% if not card_optional %}required{% endif %}
+      placeholder="Name&#9;ЦТП …&#10;N_schem&#9;12&#10;…"></textarea>
+  </label>
+  <label class="block">Выгрузка потребителей (xlsx или csv с заголовками)
+    <input type="file" accept=".xlsx,.csv" data-consumers-file required>
+  </label>
+  <textarea name="payload" hidden></textarea>
+  <button type="submit">{{ zulu_button|default('Создать расчёт') }}</button>
+</form>

@@ -53,6 +53,19 @@ class DhwFact:
 
 
 @dataclass(frozen=True)
+class VentFact:
+    """Ventilation at the CTP (`*_SV` block of the card). Stored, not checked yet."""
+
+    G1: float | None = None
+    G2: float | None = None
+    T1: float | None = None
+    T2: float | None = None
+    P1: float | None = None
+    P2: float | None = None
+    Q: float | None = None
+
+
+@dataclass(frozen=True)
 class Mode:
     tnv: float | None = None  # outdoor temperature of the measurement
     t_source: float | None = None  # supply temperature at the source
@@ -69,6 +82,7 @@ class CtpFact:
     heating: HeatingFact | None
     dhw: DhwFact | None
     mode: Mode = field(default_factory=Mode)
+    vent: VentFact | None = None
 
 
 @dataclass
@@ -95,6 +109,7 @@ class Snapshot:
     consumers: list[Consumer]
     measured_on: date | None = None
     tnv: float | None = None
+    warnings: list[str] = field(default_factory=list)  # import warnings shown on the step page
 
     def consumer(self, sys: int) -> Consumer:
         for c in self.consumers:

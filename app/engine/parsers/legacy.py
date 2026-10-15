@@ -4,53 +4,17 @@ Personal and address fields are dropped here, before anything else sees the data
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime
 from typing import Any
 
 from app.engine.model import Consumer, CtpFact, DhwFact, HeatingFact, InletFact, Mode, Snapshot
+from app.engine.parsers.common import parse_date, strip_private, to_float
 from app.engine.units import PressureUnit
-
-PRIVATE_FIELDS = frozenset({"Name", "Bld", "Adres"})
 
 
 @dataclass
 class LegacyImport:
     snapshot: Snapshot
     fact: CtpFact  # pre-filled from the stored form inputs; DHW facts are not in the export
-
-
-def is_private(key: str) -> bool:
-    k = key.lower()
-    return key in PRIVATE_FIELDS or "adres" in k or "address" in k
-
-
-def strip_private(fields: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in fields.items() if not is_private(k)}
-
-
-def to_float(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    text = str(value).strip().replace(",", ".").replace("−", "-")
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def parse_date(value: Any) -> date | None:
-    if not value:
-        return None
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(str(value).strip()[:10], fmt).date()
-        except ValueError:
-            continue
-    return None
 
 
 def parse_legacy_export(data: dict[str, Any]) -> LegacyImport:
